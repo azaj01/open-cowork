@@ -4,7 +4,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { app } from 'electron';
 import path from 'path';
 import { importLocalAuthToken } from '../auth/local-auth';
-import { OPENAI_CODEX_BACKEND_BASE_URL } from '../config/auth-utils';
+import { OPENAI_CODEX_BACKEND_BASE_URL, sanitizeOpenAIAccountId } from '../config/auth-utils';
 import { log, logError, logWarn } from '../utils/logger';
 
 /**
@@ -235,8 +235,9 @@ export class MCPManager {
         if (!merged.OPENAI_BASE_URL) {
           merged.OPENAI_BASE_URL = OPENAI_CODEX_BACKEND_BASE_URL;
         }
-        if (!merged.OPENAI_ACCOUNT_ID && localCodex?.account) {
-          merged.OPENAI_ACCOUNT_ID = localCodex.account;
+        const sanitizedAccountId = sanitizeOpenAIAccountId(localCodex?.account);
+        if (!merged.OPENAI_ACCOUNT_ID && sanitizedAccountId) {
+          merged.OPENAI_ACCOUNT_ID = sanitizedAccountId;
         }
         log('[MCPManager] Hydrated OPENAI_API_KEY from local Codex auth for MCP subprocess');
       }
@@ -1190,6 +1191,7 @@ function extractStructuredToolErrorMessage(result: any): string {
     return '';
   }
 
+  const topLevelIsError = (result as { isError?: unknown }).isError === true;
   const content = Array.isArray(result.content) ? result.content : [];
   for (const item of content) {
     if (!item || typeof item !== 'object') continue;
@@ -1203,31 +1205,39 @@ function extractStructuredToolErrorMessage(result: any): string {
     if (trimmed.startsWith('{')) {
       try {
         const parsed = JSON.parse(trimmed) as { error?: unknown; message?: unknown };
-        if (parsed.error === true && typeof parsed.message === 'string') {
-          return parsed.message;
+        if (parsed.error === true && typeof parsed.message === 'string' && parsed.message.trim()) {
+          return parsed.message.trim();
         }
       } catch {
         // Ignore malformed JSON payloads
       }
     }
 
-    return trimmed;
+    if (topLevelIsError && isReconnectableErrorText(trimmed)) {
+      return trimmed;
+    }
   }
 
   return '';
+}
+
+function isReconnectableErrorText(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized === 'not connected' ||
+    normalized.includes('mcp server not connected') ||
+    normalized.includes('connection closed')
+  );
 }
 
 function shouldReconnectOnStructuredToolError(errorMessage: string): boolean {
   if (!errorMessage) {
     return false;
   }
-
-  const normalized = errorMessage.toLowerCase();
-  return (
-    normalized === 'not connected' ||
-    normalized.includes('mcp server not connected') ||
-    normalized.includes('connection closed')
-  );
+  return isReconnectableErrorText(errorMessage);
 }
 
 function shouldHotReloadGuiVisionServer(serverName: string, actualToolName: string, errorMessage: string): boolean {

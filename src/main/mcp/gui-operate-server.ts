@@ -55,6 +55,8 @@ const OPEN_COWORK_DATA_DIR = PLATFORM === 'win32'
 const GUI_OPERATE_DIR = path.join(OPEN_COWORK_DATA_DIR, 'gui_operate');
 const SCREENSHOTS_DIR = path.join(GUI_OPERATE_DIR, 'screenshots');
 const SCREENSHOT_REUSE_WINDOW_MS = 5 * 60_000;
+const OPENAI_PLATFORM_BASE_URL = 'https://api.openai.com/v1';
+const OPENAI_ACCOUNT_ID_RE = /^[-_a-zA-Z0-9]{6,}$/;
 
 type ScreenshotCacheEntry = {
   displayIndex: number;
@@ -3397,6 +3399,7 @@ async function callVisionAPI(
   const TIMEOUT_MS = 45000; // 45 seconds
   
   const logPrefix = functionName ? `[callVisionAPI:${functionName}]` : '[callVisionAPI]';
+  let compatibilityFallbackUsed = false;
   
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -3411,11 +3414,31 @@ async function callVisionAPI(
       const errorMessage = String(error?.message || error || '');
 
       // Deterministic request-shape errors should fail fast instead of wasting retries.
-      if (
-        errorMessage.includes('Unsupported parameter') ||
-        errorMessage.includes('Instructions are required') ||
-        errorMessage.includes('Stream must be set to true')
-      ) {
+      if (isVisionRequestShapeError(errorMessage)) {
+        if (!compatibilityFallbackUsed) {
+          compatibilityFallbackUsed = true;
+          writeMCPLog(
+            `${logPrefix} Attempt ${attempt}/${MAX_RETRIES} - Request-shape error detected, running one compatibility fallback: ${errorMessage}`,
+            'API Request Error'
+          );
+          try {
+            const compatResult = await callVisionAPIWithTimeout(
+              base64Image,
+              prompt,
+              maxTokens,
+              functionName,
+              TIMEOUT_MS,
+              true,
+              errorMessage
+            );
+            writeMCPLog(`${logPrefix} Compatibility fallback succeeded`, 'API Request');
+            return compatResult;
+          } catch (compatError: any) {
+            const compatMessage = String(compatError?.message || compatError || '');
+            writeMCPLog(`${logPrefix} Compatibility fallback failed: ${compatMessage}`, 'API Request Error');
+            throw new Error(compatMessage || errorMessage);
+          }
+        }
         writeMCPLog(`${logPrefix} Attempt ${attempt}/${MAX_RETRIES} - Deterministic error, stop retry: ${errorMessage}`, 'API Request Error');
         throw new Error(errorMessage);
       }
@@ -3441,6 +3464,17 @@ async function callVisionAPI(
   throw new Error('Vision API failed: Maximum retries exceeded');
 }
 
+function isVisionRequestShapeError(errorMessage: string): boolean {
+  if (!errorMessage) {
+    return false;
+  }
+  return (
+    errorMessage.includes('Unsupported parameter') ||
+    errorMessage.includes('Instructions are required') ||
+    errorMessage.includes('Stream must be set to true')
+  );
+}
+
 function getBaseUrlHost(baseUrl: string | undefined): string {
   if (!baseUrl) {
     return '(unset)';
@@ -3459,7 +3493,8 @@ function buildVisionRuntimeSummary(
   baseUrl: string | undefined,
   model: string,
   isOpenAICompatible: boolean,
-  isCodexBackend: boolean
+  isCodexBackend: boolean,
+  compatibilityMode: boolean
 ): Record<string, unknown> {
   return {
     functionName: functionName || '(unknown)',
@@ -3470,7 +3505,35 @@ function buildVisionRuntimeSummary(
     model,
     isOpenAICompatible,
     isCodexBackend,
+    compatibilityMode,
   };
+}
+
+function sanitizeOpenAIAccountIdForHeader(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  if (!value || value.includes('@')) {
+    return undefined;
+  }
+  if (!OPENAI_ACCOUNT_ID_RE.test(value)) {
+    return undefined;
+  }
+  return value;
+}
+
+function pickVisionApiKey(
+  selectedRoute: 'openai-chat-completions-compat' | 'codex-responses' | 'openai-chat-completions' | 'anthropic-messages',
+  anthropicApiKey: string | undefined,
+  openAIApiKey: string | undefined,
+  isOpenRouter: boolean
+): string | undefined {
+  if (selectedRoute === 'anthropic-messages') {
+    return anthropicApiKey;
+  }
+  if (selectedRoute === 'codex-responses' || selectedRoute === 'openai-chat-completions-compat') {
+    return openAIApiKey;
+  }
+  // OpenRouter historically reuses Anthropic-style key env vars.
+  return openAIApiKey || (isOpenRouter ? anthropicApiKey : undefined);
 }
 
 /**
@@ -3481,12 +3544,13 @@ async function callVisionAPIWithTimeout(
   prompt: string,
   maxTokens: number,
   functionName: string | undefined,
-  timeoutMs: number
+  timeoutMs: number,
+  compatibilityMode: boolean = false,
+  previousErrorMessage?: string
 ): Promise<string> {
   // Get API configuration from environment (supports Anthropic/OpenRouter/OpenAI-compatible)
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN;
   const openAIApiKey = process.env.OPENAI_API_KEY;
-  const apiKey = anthropicApiKey || openAIApiKey;
   const hasOpenAIConfig = Boolean(process.env.OPENAI_API_KEY || process.env.OPENAI_BASE_URL || process.env.OPENAI_MODEL);
   const baseUrl = process.env.ANTHROPIC_BASE_URL || process.env.OPENAI_BASE_URL;
   const model =
@@ -3508,6 +3572,12 @@ async function callVisionAPIWithTimeout(
     (baseUrl ? baseUrl.includes('api.openai.com') : false);
 
   const isCodexBackend = Boolean(baseUrl && baseUrl.includes('chatgpt.com/backend-api/codex'));
+  const useCompatibilityOpenAIRoute = Boolean(
+    compatibilityMode &&
+    isCodexBackend &&
+    openAIApiKey &&
+    openAIApiKey.trim().startsWith('sk-')
+  );
   const runtimeSummary = buildVisionRuntimeSummary(
     functionName,
     anthropicApiKey,
@@ -3515,37 +3585,49 @@ async function callVisionAPIWithTimeout(
     baseUrl,
     model,
     isOpenAICompatible,
-    isCodexBackend
+    isCodexBackend,
+    compatibilityMode
   );
   writeMCPLog(JSON.stringify(runtimeSummary), 'Vision Runtime');
 
   const selectedRoute = isOpenAICompatible
-    ? (isCodexBackend ? 'codex-responses' : 'openai-chat-completions')
+    ? (
+      useCompatibilityOpenAIRoute
+        ? 'openai-chat-completions-compat'
+        : (isCodexBackend ? 'codex-responses' : 'openai-chat-completions')
+    )
     : 'anthropic-messages';
   writeMCPLog(
-    `[Vision Routing] function=${functionName || '(unknown)'} route=${selectedRoute} host=${getBaseUrlHost(baseUrl)} model=${model}`,
+    `[Vision Routing] function=${functionName || '(unknown)'} route=${selectedRoute} host=${getBaseUrlHost(baseUrl)} model=${model}${previousErrorMessage ? ` previousError=${previousErrorMessage}` : ''}`,
     'Vision Routing'
   );
 
-  if (!apiKey) {
-    throw new Error('API key not configured. Please set ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / OPENAI_API_KEY.');
+  const selectedApiKey = pickVisionApiKey(selectedRoute, anthropicApiKey, openAIApiKey, isOpenRouter);
+  if (!selectedApiKey) {
+    if (selectedRoute === 'anthropic-messages') {
+      throw new Error('Anthropic API key not configured. Please set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN.');
+    }
+    throw new Error('OpenAI API key not configured for vision route. Please set OPENAI_API_KEY.');
   }
   
   if (isOpenAICompatible) {
-    if (isCodexBackend) {
+    if (isCodexBackend && !useCompatibilityOpenAIRoute) {
       return await callCodexVisionResponses(
         base64Image,
         prompt,
         model,
         baseUrl!,
-        apiKey,
-        process.env.OPENAI_ACCOUNT_ID,
-        timeoutMs
+        selectedApiKey,
+        sanitizeOpenAIAccountIdForHeader(process.env.OPENAI_ACCOUNT_ID),
+        timeoutMs,
+        compatibilityMode
       );
     }
 
     // Use OpenAI-compatible API format (for Gemini, GPT, etc. via OpenRouter)
-    const openAIBaseUrl = baseUrl || 'https://api.openai.com/v1';
+    const openAIBaseUrl = useCompatibilityOpenAIRoute
+      ? OPENAI_PLATFORM_BASE_URL
+      : (baseUrl || OPENAI_PLATFORM_BASE_URL);
     const openAIUrl = openAIBaseUrl.endsWith('/v1') 
       ? `${openAIBaseUrl}/chat/completions`
       : `${openAIBaseUrl}/v1/chat/completions`;
@@ -3585,7 +3667,7 @@ async function callVisionAPIWithTimeout(
     
     const headers: any = {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
+      'Authorization': `Bearer ${selectedApiKey}`,
       'Content-Length': Buffer.byteLength(requestBody),
     };
     
@@ -3672,7 +3754,7 @@ async function callVisionAPIWithTimeout(
     // Use Anthropic API format
     const Anthropic = require('@anthropic-ai/sdk');
     const anthropic = new Anthropic({
-      apiKey: apiKey,
+      apiKey: selectedApiKey,
       baseURL: baseUrl,
       timeout: timeoutMs,
     });
@@ -3735,7 +3817,8 @@ async function callCodexVisionResponses(
   baseUrl: string,
   apiKey: string,
   accountId: string | undefined,
-  timeoutMs: number
+  timeoutMs: number,
+  compatibilityMode: boolean = false
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -3744,6 +3827,36 @@ async function callCodexVisionResponses(
     const instructions =
       'You are a GUI vision assistant. Analyze the provided screenshot and answer the user question accurately and concisely. Use Chinese unless the user explicitly requests another language.';
     const question = (prompt || '').trim() || 'Please describe what is visible in the screenshot.';
+    const requestPayload: Record<string, unknown> = compatibilityMode
+      ? {
+          model,
+          stream: true,
+          instructions,
+          input: [
+            {
+              role: 'user',
+              content: [
+                { type: 'input_text', text: question },
+                { type: 'input_image', image_url: `data:image/png;base64,${base64Image}` },
+              ],
+            },
+          ],
+        }
+      : {
+          model,
+          store: false,
+          stream: true,
+          instructions,
+          input: [
+            {
+              role: 'user',
+              content: [
+                { type: 'input_text', text: question },
+                { type: 'input_image', image_url: `data:image/png;base64,${base64Image}` },
+              ],
+            },
+          ],
+        };
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -3753,21 +3866,7 @@ async function callCodexVisionResponses(
         'User-Agent': 'CodexBar',
         ...(accountId ? { 'ChatGPT-Account-Id': accountId } : {}),
       },
-      body: JSON.stringify({
-        model,
-        store: false,
-        stream: true,
-        instructions,
-        input: [
-          {
-            role: 'user',
-            content: [
-              { type: 'input_text', text: question },
-              { type: 'input_image', image_url: `data:image/png;base64,${base64Image}` },
-            ],
-          },
-        ],
-      }),
+      body: JSON.stringify(requestPayload),
       signal: controller.signal,
     });
 
@@ -4880,6 +4979,9 @@ Example:
       }
     }
   }
+
+  // Keep success parsing internal; strip the judgment block from user-visible answer text.
+  answer = stripOperationSuccessJudgmentBlock(answer);
   
   return JSON.stringify({
     success: true,
@@ -4889,6 +4991,24 @@ Example:
     screenshot_path: screenshotPath,
     displayIndex: normalizedDisplayIndex,
   });
+}
+
+function stripOperationSuccessJudgmentBlock(answer: string): string {
+  if (!answer) {
+    return answer;
+  }
+
+  const normalized = answer.replace(/\r\n/g, '\n');
+  const patterns = [
+    /\n?\*\*Operation Success Judgment:\*\*[\s\S]*?(?:- Status:\s*(?:SUCCESS|FAILURE)[\s\S]*?(?:\n{2,}|$))/gi,
+    /\n?Operation Success Judgment:\s*[\s\S]*?(?:Status:\s*(?:SUCCESS|FAILURE)[\s\S]*?(?:\n{2,}|$))/gi,
+  ];
+
+  let stripped = normalized;
+  for (const pattern of patterns) {
+    stripped = stripped.replace(pattern, '\n\n');
+  }
+  return stripped.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function toRegionKey(region?: { x: number; y: number; width: number; height: number }): string {
@@ -5118,12 +5238,14 @@ function cleanupRepeatedVisionOutput(text: string): string {
     return normalized;
   }
 
-  const fullDup = findLongestConsecutiveDuplicateBlock(normalized, 200);
+  const stripped = stripRepeatedScreenReportSections(normalized);
+  const paragraphDeduped = dedupeConsecutiveDuplicateParagraphs(stripped);
+  const fullDup = findLongestConsecutiveDuplicateBlock(paragraphDeduped, 200);
   if (fullDup) {
     return fullDup;
   }
 
-  return normalized;
+  return paragraphDeduped;
 }
 
 function collapseLikelyEchoDoubles(text: string): string {
@@ -5158,6 +5280,50 @@ function findLongestConsecutiveDuplicateBlock(text: string, minLen: number): str
     }
   }
   return '';
+}
+
+function stripRepeatedScreenReportSections(text: string): string {
+  const intros = ['下面是对当前截图', '下面是基于截图', '以下是我基于截图', '以下是基于截图'];
+  for (const intro of intros) {
+    const first = text.indexOf(intro);
+    if (first < 0) continue;
+    const second = text.indexOf(intro, first + intro.length);
+    if (second > first + 20) {
+      return text.slice(0, second).trim();
+    }
+  }
+
+  const headingRegex = /###\s*1[).]/g;
+  const matches = [...text.matchAll(headingRegex)];
+  if (matches.length >= 2) {
+    const firstIndex = matches[0].index ?? -1;
+    const secondIndex = matches[1].index ?? -1;
+    if (firstIndex >= 0 && secondIndex > firstIndex + 120) {
+      return text.slice(0, secondIndex).trim();
+    }
+  }
+  return text;
+}
+
+function dedupeConsecutiveDuplicateParagraphs(text: string): string {
+  const blocks = text.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  if (blocks.length <= 1) {
+    return text;
+  }
+
+  const kept: string[] = [];
+  for (const block of blocks) {
+    const previous = kept[kept.length - 1] || '';
+    if (normalizeForDedup(previous) === normalizeForDedup(block)) {
+      continue;
+    }
+    kept.push(block);
+  }
+  return kept.join('\n\n').trim();
+}
+
+function normalizeForDedup(text: string): string {
+  return text.replace(/\s+/g, '').trim();
 }
 
 // ============================================================================

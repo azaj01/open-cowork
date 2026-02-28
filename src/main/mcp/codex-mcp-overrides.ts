@@ -1,7 +1,7 @@
 import type { MCPServerConfig } from './mcp-manager';
 import { mcpConfigStore } from './mcp-config-store';
 import { importLocalAuthToken } from '../auth/local-auth';
-import { OPENAI_CODEX_BACKEND_BASE_URL } from '../config/auth-utils';
+import { OPENAI_CODEX_BACKEND_BASE_URL, sanitizeOpenAIAccountId } from '../config/auth-utils';
 
 const SOFTWARE_DEV_PLACEHOLDER = '{SOFTWARE_DEV_SERVER_PATH}';
 const GUI_OPERATE_PLACEHOLDER = '{GUI_OPERATE_SERVER_PATH}';
@@ -158,8 +158,9 @@ function buildSharedAuthEnv(runtimeEnv: NodeJS.ProcessEnv): Record<string, strin
       if (!shared.OPENAI_BASE_URL) {
         shared.OPENAI_BASE_URL = OPENAI_CODEX_BACKEND_BASE_URL;
       }
-      if (!shared.OPENAI_ACCOUNT_ID && localCodex?.account) {
-        shared.OPENAI_ACCOUNT_ID = localCodex.account;
+      const sanitizedAccountId = sanitizeOpenAIAccountId(localCodex?.account);
+      if (!shared.OPENAI_ACCOUNT_ID && sanitizedAccountId) {
+        shared.OPENAI_ACCOUNT_ID = sanitizedAccountId;
       }
     }
   }

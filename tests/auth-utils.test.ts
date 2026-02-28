@@ -12,6 +12,7 @@ import {
   buildOpenAICodexHeaders,
   isLikelyOAuthAccessToken,
   resolveOpenAICredentials,
+  sanitizeOpenAIAccountId,
   shouldUseAnthropicAuthToken,
 } from '../src/main/config/auth-utils';
 
@@ -112,5 +113,11 @@ describe('auth-utils', () => {
       'User-Agent': 'CodexBar',
       'ChatGPT-Account-Id': 'acct_abc',
     });
+  });
+
+  it('sanitizes invalid OpenAI account id values', () => {
+    expect(sanitizeOpenAIAccountId('user@example.com')).toBeUndefined();
+    expect(sanitizeOpenAIAccountId('abc')).toBeUndefined();
+    expect(sanitizeOpenAIAccountId('acct_123456')).toBe('acct_123456');
   });
 });

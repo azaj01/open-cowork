@@ -136,7 +136,15 @@ function isCodexAuthFailure(message: string): boolean {
     'backend-api/codex',
     'chatgpt.com/backend-api/codex',
   ];
-  const authSignals = ['unauthorized', 'forbidden', '401', '403', 'invalid token', 'auth'];
+  const authSignals = [
+    'unauthorized',
+    'forbidden',
+    '401',
+    '403',
+    'invalid token',
+    'authentication failed',
+    'auth login',
+  ];
 
   const hasCodexContext = codexContextSignals.some((signal) => message.includes(signal));
   const hasAuthSignal = authSignals.some((signal) => message.includes(signal));

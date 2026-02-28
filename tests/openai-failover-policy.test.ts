@@ -118,4 +118,13 @@ describe('decideOpenAIFailoverFromCodex', () => {
     expect(decision.shouldFailover).toBe(false);
     expect(decision.category).toBe('non-codex-error');
   });
+
+  it('does not failover for codex-context message with generic auth wording only', () => {
+    const decision = decideOpenAIFailoverFromCodex({
+      ...baseInput,
+      error: new Error('backend-api/codex request rejected: auth scope mismatch'),
+    });
+    expect(decision.shouldFailover).toBe(false);
+    expect(decision.category).toBe('non-codex-error');
+  });
 });

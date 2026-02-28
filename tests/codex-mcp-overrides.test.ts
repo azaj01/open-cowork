@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getEnabledServers: vi.fn(() => []),
   createFromPreset: vi.fn(() => null),
+  importLocalAuthToken: vi.fn(() => null),
 }));
 
 vi.mock('../src/main/mcp/mcp-config-store', () => ({
@@ -12,7 +13,7 @@ vi.mock('../src/main/mcp/mcp-config-store', () => ({
   },
 }));
 vi.mock('../src/main/auth/local-auth', () => ({
-  importLocalAuthToken: vi.fn(() => null),
+  importLocalAuthToken: mocks.importLocalAuthToken,
 }));
 
 import {
@@ -22,6 +23,11 @@ import {
 } from '../src/main/mcp/codex-mcp-overrides';
 
 describe('codex mcp overrides', () => {
+  beforeEach(() => {
+    mocks.importLocalAuthToken.mockReset();
+    mocks.importLocalAuthToken.mockReturnValue(null);
+  });
+
   it('normalizes server keys with spaces and special chars', () => {
     expect(normalizeCodexMcpServerKey('Software Development')).toBe('Software_Development');
     expect(normalizeCodexMcpServerKey('GUI-Operate')).toBe('GUI_Operate');
@@ -133,6 +139,34 @@ describe('codex mcp overrides', () => {
 
     expect(overrides).toEqual([
       'mcp_servers.GUI_Operate={command="node",args=["/tmp/gui.js"],env={OPENAI_API_KEY="custom-key",WORKSPACE_DIR="",OPENAI_BASE_URL="https://chatgpt.com/backend-api/codex"}}',
+    ]);
+  });
+
+  it('does not inject OPENAI_ACCOUNT_ID when local codex account is an email', () => {
+    mocks.importLocalAuthToken.mockReturnValue({
+      provider: 'codex',
+      token: 'oauth-local-token',
+      path: '/tmp/auth.json',
+      account: 'user@example.com',
+    });
+
+    const overrides = buildCodexMcpOverrides({
+      servers: [
+        {
+          id: 'gui',
+          name: 'GUI_Operate',
+          type: 'stdio',
+          command: 'node',
+          args: ['/tmp/gui.js'],
+          env: {},
+          enabled: true,
+        },
+      ] as any,
+      runtimeEnv: {},
+    });
+
+    expect(overrides).toEqual([
+      'mcp_servers.GUI_Operate={command="node",args=["/tmp/gui.js"],env={OPENAI_API_KEY="oauth-local-token",OPENAI_BASE_URL="https://chatgpt.com/backend-api/codex"}}',
     ]);
   });
 });

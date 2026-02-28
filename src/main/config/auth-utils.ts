@@ -39,7 +39,7 @@ export function isOpenAIProvider(config: Pick<AppConfig, 'provider' | 'customPro
   return config.provider === 'openai' || (config.provider === 'custom' && config.customProtocol === 'openai');
 }
 
-function sanitizeChatGPTAccountId(raw: string | undefined): string | undefined {
+export function sanitizeOpenAIAccountId(raw: string | undefined): string | undefined {
   const value = raw?.trim();
   if (!value || value.includes('@')) {
     return undefined;
@@ -83,7 +83,7 @@ export function resolveOpenAICredentials(config: OpenAIConfigLike): ResolvedOpen
       return {
         apiKey: trimmedApiKey,
         baseUrl: OPENAI_CODEX_BACKEND_BASE_URL,
-        accountId: sanitizeChatGPTAccountId(localCodex?.account),
+        accountId: sanitizeOpenAIAccountId(localCodex?.account),
         useCodexOAuth: true,
         source: 'apiKey',
       };
@@ -110,7 +110,7 @@ export function resolveOpenAICredentials(config: OpenAIConfigLike): ResolvedOpen
   return {
     apiKey: localToken,
     baseUrl: OPENAI_CODEX_BACKEND_BASE_URL,
-    accountId: sanitizeChatGPTAccountId(localCodex?.account),
+    accountId: sanitizeOpenAIAccountId(localCodex?.account),
     useCodexOAuth: true,
     source: 'localCodex',
   };

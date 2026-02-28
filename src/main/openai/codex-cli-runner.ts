@@ -59,6 +59,8 @@ type CodexRunError = Error & {
   codexFailureContext?: CodexFailureContext;
 };
 
+const DEFAULT_CODEX_MODEL = 'gpt-5.2-codex';
+
 export class CodexCliRunner {
   private sendToRenderer: (event: ServerEvent) => void;
   private saveMessage?: (message: Message) => void;
@@ -94,7 +96,7 @@ export class CodexCliRunner {
     if (initialThreadId) {
       this.threadBySession.set(session.id, initialThreadId);
     }
-    const model = configStore.get('model') || process.env.OPENAI_MODEL || 'gpt-5.2-codex';
+    const model = resolveCodexRunModel(configStore.get('model'), process.env.OPENAI_MODEL);
     this.sawTodoWriteBySession.set(session.id, false);
     this.firstToolAtBySession.delete(session.id);
     this.turnStateBySession.set(session.id, {
@@ -105,8 +107,17 @@ export class CodexCliRunner {
       sawNonTodoToolUse: false,
     });
 
-    if (await this.tryRunDirectScreenInterpretation(session, prompt)) {
-      return;
+    try {
+      if (await this.tryRunDirectScreenInterpretation(session, prompt)) {
+        this.cleanupTurnScopedState(session.id);
+        return;
+      }
+    } catch (error) {
+      const message = this.formatRunError(error);
+      const surfacedError = new Error(message) as CodexRunError;
+      surfacedError.codexFailureContext = this.buildFailureContext(session.id);
+      this.cleanupTurnScopedState(session.id);
+      throw surfacedError;
     }
 
     const userPrompt = this.buildPromptWithRecoveredContext(prompt, existingMessages, Boolean(initialThreadId));
@@ -242,9 +253,7 @@ export class CodexCliRunner {
       surfacedError.codexFailureContext = this.buildFailureContext(session.id);
       throw surfacedError;
     } finally {
-      this.sawTodoWriteBySession.delete(session.id);
-      this.clearThinkingAliases(session.id);
-      this.turnStateBySession.delete(session.id);
+      this.cleanupTurnScopedState(session.id);
     }
   }
 
@@ -703,14 +712,7 @@ export class CodexCliRunner {
         toolOutput: message,
         isError: true,
       });
-      this.sendMessage(session.id, {
-        id: uuidv4(),
-        sessionId: session.id,
-        role: 'assistant',
-        content: [{ type: 'text', text: `截图或视觉解读失败：${message}` }],
-        timestamp: Date.now(),
-      });
-      return true;
+      throw new Error(message);
     } finally {
       this.currentThinkingStepBySession.delete(session.id);
       this.activeScreenInterpretBySession.delete(session.id);
@@ -1048,6 +1050,13 @@ export class CodexCliRunner {
     };
   }
 
+  private cleanupTurnScopedState(sessionId: string): void {
+    this.sawTodoWriteBySession.delete(sessionId);
+    this.firstToolAtBySession.delete(sessionId);
+    this.clearThinkingAliases(sessionId);
+    this.turnStateBySession.delete(sessionId);
+  }
+
   private cancelThinkingStep(sessionId: string, message: string): void {
     const stepId = this.currentThinkingStepBySession.get(sessionId);
     if (stepId) {
@@ -1184,6 +1193,57 @@ export function buildCodexCliArgs(params: BuildCodexArgsParams): string[] {
   }
 
   return args;
+}
+
+export function resolveCodexRunModel(
+  configuredModel: string | undefined,
+  envModel: string | undefined
+): string {
+  const preferredCandidates = [envModel, configuredModel]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean);
+
+  for (const candidate of preferredCandidates) {
+    if (isLikelyCodexCliModel(candidate)) {
+      return candidate;
+    }
+  }
+
+  return DEFAULT_CODEX_MODEL;
+}
+
+function isLikelyCodexCliModel(model: string): boolean {
+  const lower = model.toLowerCase();
+  if (!lower) {
+    return false;
+  }
+
+  if (
+    lower.includes('claude') ||
+    lower.includes('anthropic') ||
+    lower.includes('gemini') ||
+    lower.includes('glm') ||
+    lower.includes('kimi') ||
+    lower.includes('moonshot') ||
+    lower.includes('deepseek') ||
+    lower.includes('qwen')
+  ) {
+    return false;
+  }
+
+  if (lower.includes('codex')) {
+    return true;
+  }
+
+  if (lower.startsWith('gpt-')) {
+    return true;
+  }
+
+  if (/^o[0-9]/.test(lower)) {
+    return true;
+  }
+
+  return false;
 }
 
 function isBenignCodexStateNoise(line: string): boolean {
