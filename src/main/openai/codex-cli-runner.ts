@@ -9,11 +9,14 @@ import { buildOpenAICoworkInstructions } from '../utils/cowork-instructions';
 import { log, logError, logWarn } from '../utils/logger';
 import { CodexCliEventMapper, type CodexJsonEvent } from './codex-cli-event-mapper';
 import { buildScreenInterpretVisionQuestion, isScreenInterpretationPrompt } from './screen-interpret-intent';
+import { sanitizeScreenInterpretationAnswer } from './screen-interpret-output';
 
 interface CodexCliRunnerOptions {
   sendToRenderer: (event: ServerEvent) => void;
   saveMessage?: (message: Message) => void;
   mcpManager?: MCPManager;
+  getPersistedThreadId?: (sessionId: string) => string | undefined;
+  persistThreadId?: (sessionId: string, threadId?: string) => void;
 }
 
 interface BuildCodexArgsParams {
@@ -38,34 +41,76 @@ type AutoTodoItem = {
   activeForm: string;
 };
 
+type TurnExecutionState = {
+  sawPartial: boolean;
+  sawAssistantMessage: boolean;
+  sawToolUse: boolean;
+  sawToolResult: boolean;
+  sawNonTodoToolUse: boolean;
+};
+
+export type CodexFailureContext = {
+  hasTurnOutput: boolean;
+  hasTurnSideEffects: boolean;
+};
+
+type CodexRunError = Error & {
+  alreadyReportedToUser?: boolean;
+  codexFailureContext?: CodexFailureContext;
+};
+
 export class CodexCliRunner {
   private sendToRenderer: (event: ServerEvent) => void;
   private saveMessage?: (message: Message) => void;
   private mcpManager?: MCPManager;
+  private getPersistedThreadId?: (sessionId: string) => string | undefined;
+  private persistThreadId?: (sessionId: string, threadId?: string) => void;
 
   private activeProcesses: Map<string, ChildProcess> = new Map();
   private threadBySession: Map<string, string> = new Map();
   private currentThinkingStepBySession: Map<string, string> = new Map();
+  private syntheticThinkingBySession: Map<string, string> = new Map();
+  private thinkingAliasByEventStepId: Map<string, string> = new Map();
+  private firstToolAtBySession: Map<string, number> = new Map();
   private cancelledSessions: Set<string> = new Set();
   private sawTodoWriteBySession: Map<string, boolean> = new Map();
+  private activeScreenInterpretBySession: Set<string> = new Set();
+  private turnStateBySession: Map<string, TurnExecutionState> = new Map();
 
   constructor(options: CodexCliRunnerOptions) {
     this.sendToRenderer = options.sendToRenderer;
     this.saveMessage = options.saveMessage;
     this.mcpManager = options.mcpManager;
+    this.getPersistedThreadId = options.getPersistedThreadId;
+    this.persistThreadId = options.persistThreadId;
   }
 
-  async run(session: Session, prompt: string, _existingMessages: Message[]): Promise<void> {
+  async run(session: Session, prompt: string, existingMessages: Message[]): Promise<void> {
     const cwd = session.cwd || session.mountedPaths?.[0]?.real || process.cwd();
-    const initialThreadId = this.threadBySession.get(session.id);
+    const initialThreadId =
+      this.threadBySession.get(session.id) ||
+      this.getPersistedThreadId?.(session.id) ||
+      session.openaiThreadId;
+    if (initialThreadId) {
+      this.threadBySession.set(session.id, initialThreadId);
+    }
     const model = configStore.get('model') || process.env.OPENAI_MODEL || 'gpt-5.2-codex';
     this.sawTodoWriteBySession.set(session.id, false);
+    this.firstToolAtBySession.delete(session.id);
+    this.turnStateBySession.set(session.id, {
+      sawPartial: false,
+      sawAssistantMessage: false,
+      sawToolUse: false,
+      sawToolResult: false,
+      sawNonTodoToolUse: false,
+    });
 
     if (await this.tryRunDirectScreenInterpretation(session, prompt)) {
       return;
     }
 
-    const composedPrompt = this.buildPromptWithInstructions(session, prompt);
+    const userPrompt = this.buildPromptWithRecoveredContext(prompt, existingMessages, Boolean(initialThreadId));
+    const composedPrompt = this.buildPromptWithInstructions(session, userPrompt);
     const mcpOverrides = buildCodexMcpOverrides({ runtimeEnv: process.env });
     const runtimeAuthSummary = summarizeRuntimeAuthEnv(process.env);
     const mcpOverrideAuthSummary = summarizeOverrideAuthEnv(mcpOverrides);
@@ -91,6 +136,7 @@ export class CodexCliRunner {
     });
 
     this.cancelledSessions.delete(session.id);
+    this.ensureSyntheticThinkingStep(session.id, 'Thinking');
     const autoTodoSeed = this.buildAutoTodoSeed(prompt);
     let autoTodoShown = false;
     const autoTodoTimer = autoTodoSeed
@@ -111,6 +157,7 @@ export class CodexCliRunner {
       if (autoTodoTimer) {
         clearTimeout(autoTodoTimer);
       }
+      this.completeThinkingStep(session.id, 'Task completed');
       if (autoTodoShown && autoTodoSeed && !this.sawTodoWriteBySession.get(session.id)) {
         const completed = autoTodoSeed.map((item) => ({
           ...item,
@@ -120,17 +167,32 @@ export class CodexCliRunner {
         this.emitTodoWriteWidget(session.id, completed);
       }
     } catch (error) {
+      let runError: unknown = error;
       if (autoTodoTimer) {
         clearTimeout(autoTodoTimer);
       }
-      if (initialThreadId && this.shouldRetryWithoutResume(error)) {
+      if (isSessionCancelledError(runError)) {
+        if (autoTodoShown && autoTodoSeed && !this.sawTodoWriteBySession.get(session.id)) {
+          const cancelled = autoTodoSeed.map((item) => ({
+            ...item,
+            status: (item.status === 'completed' ? 'completed' : 'cancelled') as AutoTodoStatus,
+            activeForm: item.activeForm || item.content,
+          }));
+          this.emitTodoWriteWidget(session.id, cancelled);
+        }
+        this.cancelThinkingStep(session.id, 'Cancelled');
+        return;
+      }
+      if (initialThreadId && this.shouldRetryWithoutResume(runError)) {
         logWarn('[CodexCliRunner] Resume failed, retrying with fresh thread', {
           sessionId: session.id,
           threadId: initialThreadId,
         });
         this.threadBySession.delete(session.id);
+        this.persistThreadId?.(session.id, undefined);
         try {
           await runOnce(undefined);
+          this.completeThinkingStep(session.id, 'Task completed');
           if (autoTodoShown && autoTodoSeed && !this.sawTodoWriteBySession.get(session.id)) {
             const completed = autoTodoSeed.map((item) => ({
               ...item,
@@ -141,7 +203,7 @@ export class CodexCliRunner {
           }
           return;
         } catch (retryError) {
-          error = retryError;
+          runError = retryError;
         }
       }
 
@@ -149,8 +211,8 @@ export class CodexCliRunner {
         return;
       }
 
-      const message = this.formatRunError(error);
-      logError('[CodexCliRunner] Run failed:', error);
+      const message = this.formatRunError(runError);
+      logError('[CodexCliRunner] Run failed:', runError);
       if (autoTodoShown && autoTodoSeed && !this.sawTodoWriteBySession.get(session.id)) {
         const failed = autoTodoSeed.map((item) => {
           if (item.status === 'in_progress') {
@@ -161,34 +223,28 @@ export class CodexCliRunner {
         this.emitTodoWriteWidget(session.id, failed);
       }
 
-      this.sendMessage(session.id, {
-        id: uuidv4(),
-        sessionId: session.id,
-        role: 'assistant',
-        content: [{ type: 'text', text: `**Error**: ${message}` }],
-        timestamp: Date.now(),
-      });
-
-      const thinkingStepId = this.currentThinkingStepBySession.get(session.id);
-      if (thinkingStepId) {
-        this.sendTraceUpdate(session.id, thinkingStepId, {
-          status: 'error',
-          title: 'Error occurred',
-          toolOutput: message,
-          isError: true,
-        });
-      } else {
-        this.sendTraceStep(session.id, {
+      const likelyFailoverPossible = Boolean(configStore.get('apiKey')?.trim());
+      let alreadyReportedToUser = false;
+      if (!likelyFailoverPossible) {
+        this.sendMessage(session.id, {
           id: uuidv4(),
-          type: 'thinking',
-          status: 'error',
-          title: 'Error occurred',
-          content: message,
+          sessionId: session.id,
+          role: 'assistant',
+          content: [{ type: 'text', text: `**Error**: ${message}` }],
           timestamp: Date.now(),
         });
+        alreadyReportedToUser = true;
       }
+
+      this.failThinkingStep(session.id, message);
+      const surfacedError = new Error(message) as CodexRunError;
+      surfacedError.alreadyReportedToUser = alreadyReportedToUser;
+      surfacedError.codexFailureContext = this.buildFailureContext(session.id);
+      throw surfacedError;
     } finally {
       this.sawTodoWriteBySession.delete(session.id);
+      this.clearThinkingAliases(session.id);
+      this.turnStateBySession.delete(session.id);
     }
   }
 
@@ -214,10 +270,18 @@ export class CodexCliRunner {
 
   clearSdkSession(sessionId: string): void {
     this.threadBySession.delete(sessionId);
+    this.persistThreadId?.(sessionId, undefined);
+    this.currentThinkingStepBySession.delete(sessionId);
+    this.syntheticThinkingBySession.delete(sessionId);
+    this.firstToolAtBySession.delete(sessionId);
+    this.clearThinkingAliases(sessionId);
+    this.turnStateBySession.delete(sessionId);
   }
 
   private async executeCodexProcess(session: Session, cwd: string, args: string[]): Promise<void> {
     const mapper = new CodexCliEventMapper({ cwd });
+    const processStartedAt = Date.now();
+    let firstStdoutAt: number | null = null;
     const childProcess = spawn('codex', args, {
       cwd,
       env: process.env,
@@ -239,6 +303,13 @@ export class CodexCliRunner {
     };
 
     childProcess.stdout?.on('data', (chunk: Buffer | string) => {
+      if (firstStdoutAt === null) {
+        firstStdoutAt = Date.now();
+        log('[CodexCliRunner] First stdout chunk received', {
+          sessionId: session.id,
+          startup_ms: firstStdoutAt - processStartedAt,
+        });
+      }
       stdoutBuffer += chunk.toString();
       const lines = stdoutBuffer.split(/\r?\n/);
       stdoutBuffer = lines.pop() || '';
@@ -272,6 +343,7 @@ export class CodexCliRunner {
       };
 
       childProcess.on('error', (error: unknown) => {
+        this.activeProcesses.delete(session.id);
         finish(error instanceof Error ? error : new Error(String(error)));
       });
 
@@ -286,22 +358,36 @@ export class CodexCliRunner {
           this.activeProcesses.delete(session.id);
           const wasCancelled = this.cancelledSessions.delete(session.id);
           if (wasCancelled) {
-            finish();
+            finish(createSessionCancelledError(session.id));
             return;
           }
 
           if (code === 0) {
+            const firstToolAt = this.firstToolAtBySession.get(session.id);
+            log('[CodexCliRunner] Process finished', {
+              sessionId: session.id,
+              exit_code: code,
+              total_ms: Date.now() - processStartedAt,
+              startup_ms: firstStdoutAt ? firstStdoutAt - processStartedAt : null,
+              first_tool_ms: firstToolAt ? firstToolAt - processStartedAt : null,
+            });
             finish();
             return;
           }
 
           const errorMessage = this.buildExitErrorMessage(code, stderrBuffer);
+          const firstToolAt = this.firstToolAtBySession.get(session.id);
+          logWarn('[CodexCliRunner] Process exited with error', {
+            sessionId: session.id,
+            exit_code: code,
+            total_ms: Date.now() - processStartedAt,
+            startup_ms: firstStdoutAt ? firstStdoutAt - processStartedAt : null,
+            first_tool_ms: firstToolAt ? firstToolAt - processStartedAt : null,
+          });
           finish(new Error(errorMessage));
         })();
       });
     });
-
-    this.currentThinkingStepBySession.delete(session.id);
   }
 
   private async handleOutputLine(sessionId: string, mapper: CodexCliEventMapper, line: string): Promise<void> {
@@ -318,11 +404,18 @@ export class CodexCliRunner {
     for (const action of actions) {
       if (action.type === 'thread.started') {
         this.threadBySession.set(sessionId, action.threadId);
+        this.persistThreadId?.(sessionId, action.threadId);
         continue;
       }
 
       if (action.type === 'trace.step') {
         if (action.step.type === 'thinking' && action.step.status === 'running') {
+          const syntheticStepId = this.syntheticThinkingBySession.get(sessionId);
+          if (syntheticStepId && syntheticStepId !== action.step.id) {
+            this.setThinkingAlias(sessionId, action.step.id, syntheticStepId);
+            this.currentThinkingStepBySession.set(sessionId, syntheticStepId);
+            continue;
+          }
           this.currentThinkingStepBySession.set(sessionId, action.step.id);
         }
         this.sendTraceStep(sessionId, action.step);
@@ -330,17 +423,24 @@ export class CodexCliRunner {
       }
 
       if (action.type === 'trace.update') {
-        this.sendTraceUpdate(sessionId, action.stepId, action.updates);
+        const stepId = this.resolveThinkingStepAlias(sessionId, action.stepId);
+        this.sendTraceUpdate(sessionId, stepId, action.updates);
         if (action.updates.status && action.updates.status !== 'running') {
           const currentStep = this.currentThinkingStepBySession.get(sessionId);
-          if (currentStep === action.stepId) {
+          if (currentStep === stepId) {
             this.currentThinkingStepBySession.delete(sessionId);
+            this.syntheticThinkingBySession.delete(sessionId);
+            this.clearThinkingAliases(sessionId);
           }
         }
         continue;
       }
 
       if (action.type === 'tool.use') {
+        this.markTurnToolUse(sessionId, action.toolUse.name);
+        if (!this.firstToolAtBySession.has(sessionId)) {
+          this.firstToolAtBySession.set(sessionId, Date.now());
+        }
         if (action.toolUse.name === 'TodoWrite') {
           this.sawTodoWriteBySession.set(sessionId, true);
         }
@@ -355,6 +455,7 @@ export class CodexCliRunner {
       }
 
       if (action.type === 'tool.result') {
+        this.markTurnToolResult(sessionId);
         this.sendMessage(sessionId, {
           id: uuidv4(),
           sessionId,
@@ -366,6 +467,7 @@ export class CodexCliRunner {
       }
 
       if (action.type === 'assistant.message') {
+        this.markTurnAssistantMessage(sessionId);
         await this.streamAssistantMessage(sessionId, action.text);
       }
     }
@@ -377,14 +479,17 @@ export class CodexCliRunner {
       this.sendTraceStep(sessionId, step);
     }
 
-    const chunks = cleanText.match(/.{1,30}/g) || [cleanText];
+    const pacing = resolveStreamPacing(cleanText.length);
+    const chunks = cleanText.match(new RegExp(`.{1,${pacing.chunkSize}}`, 'g')) || [cleanText];
     for (const chunk of chunks) {
       if (!chunk) continue;
       if (this.cancelledSessions.has(sessionId)) {
         return;
       }
       this.sendPartial(sessionId, chunk);
-      await this.delay(10);
+      if (pacing.delayMs > 0) {
+        await this.delay(pacing.delayMs);
+      }
     }
 
     this.sendPartial(sessionId, '');
@@ -422,6 +527,51 @@ export class CodexCliRunner {
       '',
       prompt,
     ].join('\n');
+  }
+
+  private buildPromptWithRecoveredContext(prompt: string, existingMessages: Message[], hasThreadId: boolean): string {
+    if (hasThreadId) {
+      return prompt;
+    }
+
+    const recovered = this.collectRecentConversationContext(existingMessages, 6);
+    if (!recovered) {
+      return prompt;
+    }
+
+    return [
+      '[Recovered context]',
+      'Previous session thread id was unavailable, so recent context is reconstructed below.',
+      recovered,
+      '',
+      '[Current user request]',
+      prompt,
+    ].join('\n');
+  }
+
+  private collectRecentConversationContext(messages: Message[], maxTurns: number): string {
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return '';
+    }
+
+    const filtered = messages
+      .filter((message) => message.role === 'user' || message.role === 'assistant')
+      .slice(-Math.max(1, maxTurns * 2));
+
+    const lines: string[] = [];
+    for (const message of filtered) {
+      const text = message.content
+        .filter((item) => item.type === 'text')
+        .map((item) => ('text' in item ? item.text : ''))
+        .join('\n')
+        .trim();
+      if (!text) {
+        continue;
+      }
+      lines.push(`${message.role === 'user' ? 'User' : 'Assistant'}: ${text.slice(0, 1200)}`);
+    }
+
+    return lines.join('\n');
   }
 
   private buildExitErrorMessage(code: number | null, stderr: string): string {
@@ -490,6 +640,14 @@ export class CodexCliRunner {
       return false;
     }
 
+    if (this.activeScreenInterpretBySession.has(session.id)) {
+      logWarn('[CodexCliRunner] Duplicate screen interpretation request suppressed for active session turn', {
+        sessionId: session.id,
+      });
+      return true;
+    }
+    this.activeScreenInterpretBySession.add(session.id);
+
     const thinkingStepId = uuidv4();
     this.currentThinkingStepBySession.set(session.id, thinkingStepId);
     this.sendTraceStep(session.id, {
@@ -555,6 +713,7 @@ export class CodexCliRunner {
       return true;
     } finally {
       this.currentThinkingStepBySession.delete(session.id);
+      this.activeScreenInterpretBySession.delete(session.id);
     }
   }
 
@@ -760,6 +919,160 @@ export class CodexCliRunner {
     });
   }
 
+  private ensureSyntheticThinkingStep(sessionId: string, title: string): string {
+    const existing = this.syntheticThinkingBySession.get(sessionId);
+    if (existing) {
+      this.currentThinkingStepBySession.set(sessionId, existing);
+      return existing;
+    }
+
+    const stepId = uuidv4();
+    this.syntheticThinkingBySession.set(sessionId, stepId);
+    this.currentThinkingStepBySession.set(sessionId, stepId);
+    this.sendTraceStep(sessionId, {
+      id: stepId,
+      type: 'thinking',
+      status: 'running',
+      title,
+      timestamp: Date.now(),
+    });
+    return stepId;
+  }
+
+  private completeThinkingStep(sessionId: string, title: string): void {
+    const stepId = this.currentThinkingStepBySession.get(sessionId);
+    if (!stepId) {
+      return;
+    }
+    this.sendTraceUpdate(sessionId, stepId, {
+      status: 'completed',
+      title,
+    });
+    this.currentThinkingStepBySession.delete(sessionId);
+    this.syntheticThinkingBySession.delete(sessionId);
+    this.clearThinkingAliases(sessionId);
+  }
+
+  private failThinkingStep(sessionId: string, message: string): void {
+    const stepId = this.currentThinkingStepBySession.get(sessionId);
+    if (stepId) {
+      this.sendTraceUpdate(sessionId, stepId, {
+        status: 'error',
+        title: 'Error occurred',
+        toolOutput: message,
+        isError: true,
+      });
+      this.currentThinkingStepBySession.delete(sessionId);
+      this.syntheticThinkingBySession.delete(sessionId);
+      this.clearThinkingAliases(sessionId);
+      return;
+    }
+
+    this.sendTraceStep(sessionId, {
+      id: uuidv4(),
+      type: 'thinking',
+      status: 'error',
+      title: 'Error occurred',
+      content: message,
+      timestamp: Date.now(),
+    });
+  }
+
+  private setThinkingAlias(sessionId: string, eventStepId: string, targetStepId: string): void {
+    this.thinkingAliasByEventStepId.set(`${sessionId}:${eventStepId}`, targetStepId);
+  }
+
+  private resolveThinkingStepAlias(sessionId: string, stepId: string): string {
+    return this.thinkingAliasByEventStepId.get(`${sessionId}:${stepId}`) || stepId;
+  }
+
+  private clearThinkingAliases(sessionId: string): void {
+    for (const key of this.thinkingAliasByEventStepId.keys()) {
+      if (key.startsWith(`${sessionId}:`)) {
+        this.thinkingAliasByEventStepId.delete(key);
+      }
+    }
+  }
+
+  private getOrCreateTurnState(sessionId: string): TurnExecutionState {
+    const existing = this.turnStateBySession.get(sessionId);
+    if (existing) {
+      return existing;
+    }
+    const initial: TurnExecutionState = {
+      sawPartial: false,
+      sawAssistantMessage: false,
+      sawToolUse: false,
+      sawToolResult: false,
+      sawNonTodoToolUse: false,
+    };
+    this.turnStateBySession.set(sessionId, initial);
+    return initial;
+  }
+
+  private markTurnPartial(sessionId: string): void {
+    const state = this.getOrCreateTurnState(sessionId);
+    state.sawPartial = true;
+  }
+
+  private markTurnAssistantMessage(sessionId: string): void {
+    const state = this.getOrCreateTurnState(sessionId);
+    state.sawAssistantMessage = true;
+  }
+
+  private markTurnToolUse(sessionId: string, toolName: string): void {
+    const state = this.getOrCreateTurnState(sessionId);
+    state.sawToolUse = true;
+    if (toolName !== 'TodoWrite') {
+      state.sawNonTodoToolUse = true;
+    }
+  }
+
+  private markTurnToolResult(sessionId: string): void {
+    const state = this.getOrCreateTurnState(sessionId);
+    state.sawToolResult = true;
+  }
+
+  private buildFailureContext(sessionId: string): CodexFailureContext {
+    const state = this.turnStateBySession.get(sessionId);
+    if (!state) {
+      return {
+        hasTurnOutput: false,
+        hasTurnSideEffects: false,
+      };
+    }
+    return {
+      hasTurnOutput:
+        state.sawPartial || state.sawAssistantMessage || state.sawToolUse || state.sawToolResult,
+      hasTurnSideEffects: state.sawNonTodoToolUse || state.sawToolResult,
+    };
+  }
+
+  private cancelThinkingStep(sessionId: string, message: string): void {
+    const stepId = this.currentThinkingStepBySession.get(sessionId);
+    if (stepId) {
+      this.sendTraceUpdate(sessionId, stepId, {
+        status: 'error',
+        title: 'Cancelled',
+        toolOutput: message,
+        isError: true,
+      });
+      this.currentThinkingStepBySession.delete(sessionId);
+      this.syntheticThinkingBySession.delete(sessionId);
+      this.clearThinkingAliases(sessionId);
+      return;
+    }
+
+    this.sendTraceStep(sessionId, {
+      id: uuidv4(),
+      type: 'thinking',
+      status: 'error',
+      title: 'Cancelled',
+      content: message,
+      timestamp: Date.now(),
+    });
+  }
+
   private sendTraceStep(sessionId: string, step: TraceStep): void {
     this.sendToRenderer({ type: 'trace.step', payload: { sessionId, step } });
   }
@@ -769,6 +1082,26 @@ export class CodexCliRunner {
   }
 
   private sendMessage(sessionId: string, message: Message): void {
+    for (const block of message.content) {
+      if (!block || typeof block !== 'object') {
+        continue;
+      }
+      if (block.type === 'tool_use') {
+        this.markTurnToolUse(sessionId, block.name);
+        if (!this.firstToolAtBySession.has(sessionId)) {
+          this.firstToolAtBySession.set(sessionId, Date.now());
+        }
+        continue;
+      }
+      if (block.type === 'tool_result') {
+        this.markTurnToolResult(sessionId);
+        continue;
+      }
+      if (message.role === 'assistant' && block.type === 'text' && block.text.trim()) {
+        this.markTurnAssistantMessage(sessionId);
+      }
+    }
+
     if (this.saveMessage) {
       this.saveMessage(message);
     }
@@ -776,6 +1109,9 @@ export class CodexCliRunner {
   }
 
   private sendPartial(sessionId: string, delta: string): void {
+    if (delta.trim()) {
+      this.markTurnPartial(sessionId);
+    }
     this.sendToRenderer({ type: 'stream.partial', payload: { sessionId, delta } });
   }
 
@@ -830,7 +1166,7 @@ export function buildCodexCliArgs(params: BuildCodexArgsParams): string[] {
   if (params.threadId) {
     args.push('resume', '--json', '--skip-git-repo-check');
   } else {
-    args.push('--json', '--skip-git-repo-check', '-C', params.cwd);
+    args.push('--json', '--skip-git-repo-check', '--ephemeral', '-C', params.cwd);
   }
 
   if (params.model?.trim()) {
@@ -1034,49 +1370,35 @@ function buildTodoTemplate(prompt: string): string[] {
   ];
 }
 
-function sanitizeScreenInterpretationAnswer(raw: string): string {
-  let text = (raw || '').replace(/\r\n/g, '\n').trim();
-  if (!text) {
-    return text;
+function resolveStreamPacing(textLength: number): { chunkSize: number; delayMs: number } {
+  if (textLength >= 6000) {
+    return { chunkSize: 160, delayMs: 0 };
   }
-
-  text = collapseLikelyEchoedCjk(text);
-  text = cutRepeatedScreenReport(text);
-  return text.trim();
+  if (textLength >= 2400) {
+    return { chunkSize: 120, delayMs: 1 };
+  }
+  if (textLength >= 1000) {
+    return { chunkSize: 90, delayMs: 2 };
+  }
+  if (textLength >= 400) {
+    return { chunkSize: 60, delayMs: 3 };
+  }
+  return { chunkSize: 40, delayMs: 4 };
 }
 
-function collapseLikelyEchoedCjk(text: string): string {
-  const cjk = text.match(/[\u4e00-\u9fff]/g) || [];
-  if (cjk.length < 60) {
-    return text;
-  }
-  const doubled = text.match(/([\u4e00-\u9fff])\1/g) || [];
-  const ratio = doubled.length / cjk.length;
-  if (ratio < 0.18) {
-    return text;
-  }
-  return text.replace(/([\u4e00-\u9fff])\1/g, '$1');
+type SessionCancelledError = Error & { isSessionCancelled: true };
+
+function createSessionCancelledError(sessionId: string): SessionCancelledError {
+  const error = new Error(`Session cancelled: ${sessionId}`) as SessionCancelledError;
+  error.isSessionCancelled = true;
+  return error;
 }
 
-function cutRepeatedScreenReport(text: string): string {
-  const intros = ['下面是基于截图', '以下是我基于截图', '以下是基于截图'];
-  for (const intro of intros) {
-    const first = text.indexOf(intro);
-    if (first < 0) continue;
-    const second = text.indexOf(intro, first + intro.length);
-    if (second > first + 80) {
-      return text.slice(0, second).trim();
-    }
-  }
-
-  const headingRegex = /###\s*1[\)\.]/g;
-  const matches = [...text.matchAll(headingRegex)];
-  if (matches.length >= 2) {
-    const firstIndex = matches[0].index ?? -1;
-    const secondIndex = matches[1].index ?? -1;
-    if (firstIndex >= 0 && secondIndex > firstIndex + 120) {
-      return text.slice(0, secondIndex).trim();
-    }
-  }
-  return text;
+function isSessionCancelledError(error: unknown): error is SessionCancelledError {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'isSessionCancelled' in error &&
+      (error as { isSessionCancelled?: boolean }).isSessionCancelled === true
+  );
 }

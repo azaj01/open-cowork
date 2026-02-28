@@ -11,6 +11,8 @@ import {
   splitChildrenByFileMentions,
   getFileLinkButtonClassName
 } from '../utils/file-link';
+import { normalizeLocalFileMarkdownLinks, resolveLocalFilePathFromHref } from '../utils/markdown-local-link';
+import { shouldUseScreenshotSummary } from '../utils/tool-result-summary';
 import type { Message, ContentBlock, ToolUseContent, ToolResultContent, QuestionItem, FileAttachmentContent } from '../types';
 import {
   ChevronDown,
@@ -157,10 +159,12 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
     <button
       key={key}
       type="button"
-      onClick={() => {
-        if (typeof window !== 'undefined' && window.electronAPI?.showItemInFolder) {
-          void window.electronAPI.showItemInFolder(resolveFilePath(value));
+      onClick={async () => {
+        if (typeof window === 'undefined' || !window.electronAPI?.showItemInFolder) {
+          return;
         }
+        const resolvedPath = resolveFilePath(value);
+        await window.electronAPI.showItemInFolder(resolvedPath, currentWorkingDir);
       }}
       className={getFileLinkButtonClassName()}
       title="在文件夹中定位"
@@ -194,6 +198,7 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
     case 'text': {
       const textBlock = block as { type: 'text'; text: string };
       const text = textBlock.text || '';
+      const normalizedText = normalizeLocalFileMarkdownLinks(text);
       
       if (!text) {
         return <span className="text-text-muted italic">(empty text)</span>;
@@ -216,17 +221,35 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
             rehypePlugins={[rehypeKatex]}
             components={{
               a({ children, href }) {
+                const localFilePath = resolveLocalFilePathFromHref(href, currentWorkingDir);
+                if (localFilePath) {
+                  return (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (typeof window === 'undefined' || !window.electronAPI?.showItemInFolder) {
+                          return;
+                        }
+                        await window.electronAPI.showItemInFolder(localFilePath, currentWorkingDir);
+                      }}
+                      className={getFileLinkButtonClassName()}
+                      title="在文件夹中定位"
+                    >
+                      {children}
+                    </button>
+                  );
+                }
+
                 return (
                   <a
                     href={href}
-                    target="_blank"
                     rel="noreferrer"
                     onClick={(event) => {
+                      event.preventDefault();
                       if (!href) {
                         return;
                       }
                       if (typeof window !== 'undefined' && window.electronAPI?.openExternal) {
-                        event.preventDefault();
                         void window.electronAPI.openExternal(href);
                       }
                     }}
@@ -330,7 +353,7 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
               },
             }}
           >
-            {text}
+            {normalizedText}
           </ReactMarkdown>
           {isStreaming && (
             <span className="inline-block w-2 h-4 bg-accent ml-1 animate-pulse" />
@@ -801,6 +824,40 @@ function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultConte
     }
   };
 
+  const normalizeForDedup = (value: string): string => value.replace(/\s+/g, '').trim();
+
+  const sanitizeVisionAnswerForDisplay = (value: string): string => {
+    const normalized = (value || '').replace(/\r\n/g, '\n').trim();
+    if (!normalized) return normalized;
+
+    const withoutJudgment = normalized
+      .replace(
+        /\n?\*\*Operation Success Judgment:\*\*[\s\S]*?(?:- Status:\s*(?:SUCCESS|FAILURE)[\s\S]*?(?:\n{2,}|$))/gi,
+        '\n\n'
+      )
+      .replace(
+        /\n?Operation Success Judgment:\s*[\s\S]*?(?:Status:\s*(?:SUCCESS|FAILURE)[\s\S]*?(?:\n{2,}|$))/gi,
+        '\n\n'
+      )
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    const blocks = withoutJudgment.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+    if (blocks.length <= 1) {
+      return withoutJudgment;
+    }
+
+    const kept: string[] = [];
+    for (const blockText of blocks) {
+      const previous = kept[kept.length - 1] || '';
+      if (normalizeForDedup(previous) === normalizeForDedup(blockText)) {
+        continue;
+      }
+      kept.push(blockText);
+    }
+    return kept.join('\n\n').trim();
+  };
+
   const formatDisplayContent = (content: string): string => {
     if (!toolNameLower.endsWith('__gui_verify_vision')) {
       return content;
@@ -813,10 +870,10 @@ function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultConte
 
     const answer = typeof parsed.answer === 'string' ? parsed.answer.trim() : '';
     if (answer) {
-      return answer;
+      return sanitizeVisionAnswerForDisplay(answer);
     }
 
-    return content;
+    return sanitizeVisionAnswerForDisplay(content);
   };
 
   // Generate summary for tool results
@@ -849,10 +906,6 @@ function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultConte
       return '✓ Vision analysis completed';
     }
 
-    if (toolNameLower.endsWith('__screenshot_for_display')) {
-      return '✓ Screenshot captured';
-    }
-
     // Success cases - try to extract meaningful info
 
     // Chrome DevTools MCP Server responses
@@ -869,7 +922,7 @@ function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultConte
       return '✓ New page created';
     }
 
-    if (content.includes('Screenshot saved') || content.includes('screenshot')) {
+    if (shouldUseScreenshotSummary(toolName, content)) {
       return '✓ Screenshot captured';
     }
 
