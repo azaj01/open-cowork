@@ -1690,105 +1690,125 @@ async function windowsPerformClick(
   clickType: 'single' | 'double' | 'right' | 'triple' = 'single',
   modifiers: string[] = []
 ): Promise<void> {
-  // Build modifier key press/release scripts
-  let modifierDown = '';
-  let modifierUp = '';
-  
+  // Build modifier key virtual key codes
+  const modKeyCodes: number[] = [];
   for (const mod of modifiers) {
     const modLower = mod.toLowerCase();
     // Virtual key codes: Ctrl=0x11, Shift=0x10, Alt=0x12
     if (modLower === 'ctrl' || modLower === 'control') {
-      modifierDown += '[Win32Functions.mouse_event]::keybd_event(0x11, 0, 0, 0)\n';
-      modifierUp += '[Win32Functions.mouse_event]::keybd_event(0x11, 0, 2, 0)\n';
+      modKeyCodes.push(0x11);
     } else if (modLower === 'shift') {
-      modifierDown += '[Win32Functions.mouse_event]::keybd_event(0x10, 0, 0, 0)\n';
-      modifierUp += '[Win32Functions.mouse_event]::keybd_event(0x10, 0, 2, 0)\n';
+      modKeyCodes.push(0x10);
     } else if (modLower === 'alt' || modLower === 'option') {
-      modifierDown += '[Win32Functions.mouse_event]::keybd_event(0x12, 0, 0, 0)\n';
-      modifierUp += '[Win32Functions.mouse_event]::keybd_event(0x12, 0, 2, 0)\n';
+      modKeyCodes.push(0x12);
     } else if (modLower === 'cmd' || modLower === 'command') {
       // Map Cmd to Ctrl on Windows
-      modifierDown += '[Win32Functions.mouse_event]::keybd_event(0x11, 0, 0, 0)\n';
-      modifierUp += '[Win32Functions.mouse_event]::keybd_event(0x11, 0, 2, 0)\n';
+      modKeyCodes.push(0x11);
     }
   }
-  
-  let clickScript = '';
-  
-  switch (clickType) {
-    case 'double':
-      clickScript = `
-[Win32Functions.mouse_event]::mouse_event(0x0002, 0, 0, 0, 0)  # Left down
-[Win32Functions.mouse_event]::mouse_event(0x0004, 0, 0, 0, 0)  # Left up
-Start-Sleep -Milliseconds 50
-[Win32Functions.mouse_event]::mouse_event(0x0002, 0, 0, 0, 0)  # Left down
-[Win32Functions.mouse_event]::mouse_event(0x0004, 0, 0, 0, 0)  # Left up
-`;
-      break;
-    case 'right':
-      clickScript = `
-[Win32Functions.mouse_event]::mouse_event(0x0008, 0, 0, 0, 0)  # Right down
-[Win32Functions.mouse_event]::mouse_event(0x0010, 0, 0, 0, 0)  # Right up
-`;
-      break;
-    case 'triple':
-      clickScript = `
-[Win32Functions.mouse_event]::mouse_event(0x0002, 0, 0, 0, 0)  # Left down
-[Win32Functions.mouse_event]::mouse_event(0x0004, 0, 0, 0, 0)  # Left up
-Start-Sleep -Milliseconds 50
-[Win32Functions.mouse_event]::mouse_event(0x0002, 0, 0, 0, 0)  # Left down
-[Win32Functions.mouse_event]::mouse_event(0x0004, 0, 0, 0, 0)  # Left up
-Start-Sleep -Milliseconds 50
-[Win32Functions.mouse_event]::mouse_event(0x0002, 0, 0, 0, 0)  # Left down
-[Win32Functions.mouse_event]::mouse_event(0x0004, 0, 0, 0, 0)  # Left up
-`;
-      break;
-    case 'single':
-    default:
-      clickScript = `
-[Win32Functions.mouse_event]::mouse_event(0x0002, 0, 0, 0, 0)  # Left down
-[Win32Functions.mouse_event]::mouse_event(0x0004, 0, 0, 0, 0)  # Left up
-`;
-      break;
+
+  // Determine mouse flags for SendInput
+  // MOUSEEVENTF_LEFTDOWN=0x0002, LEFTUP=0x0004, RIGHTDOWN=0x0008, RIGHTUP=0x0010
+  let clickCount = 1;
+  let downFlag = '0x0002';
+  let upFlag = '0x0004';
+  if (clickType === 'right') {
+    downFlag = '0x0008';
+    upFlag = '0x0010';
+  } else if (clickType === 'double') {
+    clickCount = 2;
+  } else if (clickType === 'triple') {
+    clickCount = 3;
   }
-  
+
+  // Build modifier press/release PowerShell code using SendInput for keyboard
+  const modDownCode = modKeyCodes.map(vk =>
+    `$ki = New-Object WinClick+INPUT; $ki.type = 1; $ki.ki = New-Object WinClick+KEYBDINPUT; $ki.ki.wVk = ${vk}; $ki.ki.dwFlags = 0; [WinClick]::SendInput(1, @($ki), $inputSize) | Out-Null`
+  ).join('\n');
+  const modUpCode = modKeyCodes.map(vk =>
+    `$ki = New-Object WinClick+INPUT; $ki.type = 1; $ki.ki = New-Object WinClick+KEYBDINPUT; $ki.ki.wVk = ${vk}; $ki.ki.dwFlags = 2; [WinClick]::SendInput(1, @($ki), $inputSize) | Out-Null`
+  ).join('\n');
+
+  // Build click sequence
+  let clickCode = '';
+  for (let i = 0; i < clickCount; i++) {
+    if (i > 0) clickCode += 'Start-Sleep -Milliseconds 50\n';
+    clickCode += `
+$mi = New-Object WinClick+INPUT; $mi.type = 0; $mi.mi = New-Object WinClick+MOUSEINPUT; $mi.mi.dwFlags = ${downFlag}; [WinClick]::SendInput(1, @($mi), $inputSize) | Out-Null
+$mi2 = New-Object WinClick+INPUT; $mi2.type = 0; $mi2.mi = New-Object WinClick+MOUSEINPUT; $mi2.mi.dwFlags = ${upFlag}; [WinClick]::SendInput(1, @($mi2), $inputSize) | Out-Null
+`;
+  }
+
   const script = `
 Add-Type -AssemblyName System.Windows.Forms
 
-$signature = @"
-[DllImport("user32.dll")]
-public static extern bool SetProcessDPIAware();
-[DllImport("user32.dll")]
-public static extern bool SetCursorPos(int X, int Y);
-[DllImport("user32.dll")]
-public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
-[DllImport("user32.dll")]
-public static extern void keybd_event(byte bVk, byte bScan, int dwFlags, int dwExtraInfo);
+$code = @"
+using System;
+using System.Runtime.InteropServices;
+
+public class WinClick {
+    [DllImport("user32.dll")]
+    public static extern bool SetProcessDPIAware();
+
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int X, int Y);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MOUSEINPUT {
+        public int dx;
+        public int dy;
+        public int mouseData;
+        public int dwFlags;
+        public int time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KEYBDINPUT {
+        public short wVk;
+        public short wScan;
+        public int dwFlags;
+        public int time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct INPUT {
+        public int type;
+        public MOUSEINPUT mi;
+        public KEYBDINPUT ki;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+}
 "@
 
-Add-Type -MemberDefinition $signature -Name mouse_event -Namespace Win32Functions
+Add-Type -TypeDefinition $code -Language CSharp
 
 # Set DPI awareness for accurate cursor positioning
-[Win32Functions.mouse_event]::SetProcessDPIAware() | Out-Null
+[WinClick]::SetProcessDPIAware() | Out-Null
+
+$inputSize = [System.Runtime.InteropServices.Marshal]::SizeOf([type][WinClick+INPUT])
 
 # Set cursor position
-[Win32Functions.mouse_event]::SetCursorPos(${globalX}, ${globalY})
-Start-Sleep -Milliseconds 50
+[WinClick]::SetCursorPos(${globalX}, ${globalY})
+Start-Sleep -Milliseconds 100
 
 # Press modifier keys
-${modifierDown}
+${modDownCode}
 
-# Perform click
-${clickScript}
+# Perform click(s)
+${clickCode}
 
 # Release modifier keys
-${modifierUp}
+${modUpCode}
 
 Write-Output "SUCCESS"
 `;
 
   const result = await executePowerShell(script);
-  
+
   if (!result.stdout.includes('SUCCESS')) {
     throw new Error(`Click failed: ${result.stderr || result.stdout}`);
   }
@@ -1972,41 +1992,137 @@ async function windowsPerformScroll(
   amount: number = 3
 ): Promise<void> {
   // WHEEL_DELTA is 120, amount is number of notches
-  const wheelDelta = direction === 'up' ? (120 * amount) : 
+  const wheelDelta = direction === 'up' ? (120 * amount) :
                      direction === 'down' ? (-120 * amount) : 0;
   const hWheelDelta = direction === 'left' ? (-120 * amount) :
                       direction === 'right' ? (120 * amount) : 0;
-  
+
+  // Use SendInput API instead of deprecated mouse_event for better compatibility
+  // with modern applications (e.g. WeChat, Electron apps)
+  const isHorizontal = hWheelDelta !== 0;
+  const delta = isHorizontal ? hWheelDelta : wheelDelta;
+  // MOUSEEVENTF_WHEEL = 0x0800, MOUSEEVENTF_HWHEEL = 0x01000
+  const mouseFlag = isHorizontal ? '0x01000' : '0x0800';
+
   const script = `
 Add-Type -AssemblyName System.Windows.Forms
 
-$signature = @"
-[DllImport("user32.dll")]
-public static extern bool SetProcessDPIAware();
-[DllImport("user32.dll")]
-public static extern bool SetCursorPos(int X, int Y);
-[DllImport("user32.dll")]
-public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
+$code = @"
+using System;
+using System.Runtime.InteropServices;
+
+public class WinScroll {
+    [DllImport("user32.dll")]
+    public static extern bool SetProcessDPIAware();
+
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int X, int Y);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(POINT point);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MOUSEINPUT {
+        public int dx;
+        public int dy;
+        public int mouseData;
+        public int dwFlags;
+        public int time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KEYBDINPUT {
+        public short wVk;
+        public short wScan;
+        public int dwFlags;
+        public int time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct INPUT {
+        public int type;
+        public MOUSEINPUT mi;
+        public KEYBDINPUT ki;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+}
 "@
 
-Add-Type -MemberDefinition $signature -Name mouse_event -Namespace Win32Functions
+Add-Type -TypeDefinition $code -Language CSharp
 
-# Set DPI awareness
-[Win32Functions.mouse_event]::SetProcessDPIAware() | Out-Null
+try {
+    # Set DPI awareness
+    [WinScroll]::SetProcessDPIAware() | Out-Null
 
-# Set cursor position
-[Win32Functions.mouse_event]::SetCursorPos(${globalX}, ${globalY})
-Start-Sleep -Milliseconds 50
+    # Move cursor to target position
+    [WinScroll]::SetCursorPos(${globalX}, ${globalY})
+    Start-Sleep -Milliseconds 100
 
-# Perform scroll (0x0800 = MOUSEEVENTF_WHEEL, 0x01000 = MOUSEEVENTF_HWHEEL)
-${wheelDelta !== 0 ? `[Win32Functions.mouse_event]::mouse_event(0x0800, 0, 0, ${wheelDelta}, 0)` : ''}
-${hWheelDelta !== 0 ? `[Win32Functions.mouse_event]::mouse_event(0x01000, 0, 0, ${hWheelDelta}, 0)` : ''}
+    # Activate the window under cursor so it receives scroll events
+    $pt = New-Object WinScroll+POINT
+    $pt.X = ${globalX}
+    $pt.Y = ${globalY}
+    $hwnd = [WinScroll]::WindowFromPoint($pt)
+    if ($hwnd -ne [IntPtr]::Zero) {
+        # Get the top-level parent window (GA_ROOT = 2)
+        $rootHwnd = [WinScroll]::GetAncestor($hwnd, 2)
+        if ($rootHwnd -ne [IntPtr]::Zero) {
+            [WinScroll]::SetForegroundWindow($rootHwnd) | Out-Null
+        } else {
+            [WinScroll]::SetForegroundWindow($hwnd) | Out-Null
+        }
+        Start-Sleep -Milliseconds 50
+    }
 
-Write-Output "SUCCESS"
+    # Re-position cursor after window activation (activation may shift focus)
+    [WinScroll]::SetCursorPos(${globalX}, ${globalY})
+    Start-Sleep -Milliseconds 50
+
+    # Build and send scroll input using SendInput
+    $inputSize = [System.Runtime.InteropServices.Marshal]::SizeOf([type][WinScroll+INPUT])
+    $input = New-Object WinScroll+INPUT
+    $input.type = 0  # INPUT_MOUSE
+    $input.mi = New-Object WinScroll+MOUSEINPUT
+    $input.mi.dx = 0
+    $input.mi.dy = 0
+    $input.mi.mouseData = ${delta}
+    $input.mi.dwFlags = ${mouseFlag}
+    $input.mi.time = 0
+    $input.mi.dwExtraInfo = [IntPtr]::Zero
+
+    $inputs = @($input)
+    $result = [WinScroll]::SendInput(1, $inputs, $inputSize)
+
+    if ($result -eq 1) {
+        Write-Output "SUCCESS"
+    } else {
+        $lastErr = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        Write-Output "FAILED: SendInput returned $result, LastError=$lastErr, inputSize=$inputSize"
+    }
+} catch {
+    Write-Output "ERROR: $_"
+    exit 1
+}
 `;
 
   const result = await executePowerShell(script);
-  
+
   if (!result.stdout.includes('SUCCESS')) {
     throw new Error(`Scroll failed: ${result.stderr || result.stdout}`);
   }
@@ -2077,40 +2193,67 @@ async function windowsPerformDrag(
   const script = `
 Add-Type -AssemblyName System.Windows.Forms
 
-$signature = @"
-[DllImport("user32.dll")]
-public static extern bool SetProcessDPIAware();
-[DllImport("user32.dll")]
-public static extern bool SetCursorPos(int X, int Y);
-[DllImport("user32.dll")]
-public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
+$code = @"
+using System;
+using System.Runtime.InteropServices;
+
+public class WinDrag {
+    [DllImport("user32.dll")]
+    public static extern bool SetProcessDPIAware();
+
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int X, int Y);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MOUSEINPUT {
+        public int dx;
+        public int dy;
+        public int mouseData;
+        public int dwFlags;
+        public int time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct INPUT {
+        public int type;
+        public MOUSEINPUT mi;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+}
 "@
 
-Add-Type -MemberDefinition $signature -Name mouse_event -Namespace Win32Functions
+Add-Type -TypeDefinition $code -Language CSharp
 
 # Set DPI awareness
-[Win32Functions.mouse_event]::SetProcessDPIAware() | Out-Null
+[WinDrag]::SetProcessDPIAware() | Out-Null
+
+$inputSize = [System.Runtime.InteropServices.Marshal]::SizeOf([type][WinDrag+INPUT])
 
 # Move to start position
-[Win32Functions.mouse_event]::SetCursorPos(${fromX}, ${fromY})
-Start-Sleep -Milliseconds 50
+[WinDrag]::SetCursorPos(${fromX}, ${fromY})
+Start-Sleep -Milliseconds 100
 
-# Press left button
-[Win32Functions.mouse_event]::mouse_event(0x0002, 0, 0, 0, 0)
+# Press left button (MOUSEEVENTF_LEFTDOWN = 0x0002)
+$mi = New-Object WinDrag+INPUT; $mi.type = 0; $mi.mi = New-Object WinDrag+MOUSEINPUT; $mi.mi.dwFlags = 0x0002
+[WinDrag]::SendInput(1, @($mi), $inputSize) | Out-Null
 Start-Sleep -Milliseconds 50
 
 # Move to end position
-[Win32Functions.mouse_event]::SetCursorPos(${toX}, ${toY})
+[WinDrag]::SetCursorPos(${toX}, ${toY})
 Start-Sleep -Milliseconds 50
 
-# Release left button
-[Win32Functions.mouse_event]::mouse_event(0x0004, 0, 0, 0, 0)
+# Release left button (MOUSEEVENTF_LEFTUP = 0x0004)
+$mi2 = New-Object WinDrag+INPUT; $mi2.type = 0; $mi2.mi = New-Object WinDrag+MOUSEINPUT; $mi2.mi.dwFlags = 0x0004
+[WinDrag]::SendInput(1, @($mi2), $inputSize) | Out-Null
 
 Write-Output "SUCCESS"
 `;
 
   const result = await executePowerShell(script);
-  
+
   if (!result.stdout.includes('SUCCESS')) {
     throw new Error(`Drag failed: ${result.stderr || result.stdout}`);
   }
@@ -3637,9 +3780,12 @@ async function annotateScreenshotWithClickHistory(
   // Get display configuration to handle Retina scaling
   const config = await getDisplayConfiguration();
   const targetDisplay = config.displays.find(d => d.index === displayIndex);
-  const scaleFactor = targetDisplay?.scaleFactor || 1;
-  
-  writeMCPLog(`[annotateScreenshot] Image dimensions: ${imageDims.width}x${imageDims.height}, scaleFactor: ${scaleFactor}`, 'Image Info');
+  const rawScaleFactor = targetDisplay?.scaleFactor || 1;
+  // On Windows, click coordinates are already in physical pixels (DPI-aware pipeline),
+  // so no scaling is needed. On macOS, coordinates are logical and need scaleFactor.
+  const scaleFactor = PLATFORM === 'win32' ? 1 : rawScaleFactor;
+
+  writeMCPLog(`[annotateScreenshot] Image dimensions: ${imageDims.width}x${imageDims.height}, rawScaleFactor: ${rawScaleFactor}, effective: ${scaleFactor}`, 'Image Info');
   
   // Find the most recent click (highest timestamp) to display as #0
   const mostRecentClick = clickHistoryForDisplay.reduce((latest, current) => 
@@ -4028,13 +4174,16 @@ async function analyzeScreenshotWithVision(
     writeMCPLog(`[analyzeScreenshotWithVision] Calculated center from bounding box (pixels): x=${pixelCenterX}, y=${pixelCenterY}`, 'Center Calculation');
 
     // Convert from pixel coordinates to logical coordinates
-    // On Retina displays (scaleFactor=2), screenshots are 2x the logical resolution
-    // Vision returns pixel coordinates, but cliclick uses logical coordinates
-    const scaleFactor = targetDisplay.scaleFactor || 1;
-    writeMCPLog(`[analyzeScreenshotWithVision] Display scaleFactor: ${scaleFactor}`, 'Coordinate Conversion');
+    // On macOS Retina displays (scaleFactor=2), screenshots are 2x the logical resolution,
+    // and cliclick uses logical coordinates, so we must divide by scaleFactor.
+    // On Windows, the entire pipeline (display config, screenshot, SetCursorPos) works in
+    // physical pixels (DPI-aware), so no division is needed (effectiveScaleFactor = 1).
+    const rawScaleFactor = targetDisplay.scaleFactor || 1;
+    const effectiveScaleFactor = PLATFORM === 'win32' ? 1 : rawScaleFactor;
+    writeMCPLog(`[analyzeScreenshotWithVision] Display scaleFactor: ${rawScaleFactor}, effective (platform=${PLATFORM}): ${effectiveScaleFactor}`, 'Coordinate Conversion');
 
-    const logicalX = pixelCenterX / scaleFactor;
-    const logicalY = pixelCenterY / scaleFactor;
+    const logicalX = pixelCenterX / effectiveScaleFactor;
+    const logicalY = pixelCenterY / effectiveScaleFactor;
 
     writeMCPLog(`[analyzeScreenshotWithVision] Logical coordinates for cliclick: x=${logicalX}, y=${logicalY}`, 'Coordinate Conversion');
 
@@ -4329,11 +4478,14 @@ async function locateGUIElement(
       : config.displays.find(d => d.isMain);
 
     if (targetDisplay) {
-      const scaleFactor = targetDisplay.scaleFactor || 1;
-      const pixelX = coords.x * scaleFactor;
-      const pixelY = coords.y * scaleFactor;
+      // On macOS, coords are logical (divided by scaleFactor), so multiply back to get pixels.
+      // On Windows, coords are already in physical pixels (no scaleFactor division was applied).
+      const rawScaleFactor = targetDisplay.scaleFactor || 1;
+      const effectiveScaleFactor = PLATFORM === 'win32' ? 1 : rawScaleFactor;
+      const pixelX = coords.x * effectiveScaleFactor;
+      const pixelY = coords.y * effectiveScaleFactor;
 
-      writeMCPLog(`[locateGUIElement] Marking point on screenshot: logical=(${coords.x}, ${coords.y}), pixel=(${pixelX}, ${pixelY})`, 'Image Marking');
+      writeMCPLog(`[locateGUIElement] Marking point on screenshot: logical=(${coords.x}, ${coords.y}), pixel=(${pixelX}, ${pixelY}), effectiveScale=${effectiveScaleFactor}`, 'Image Marking');
 
       // coords.boundingBox is already in pixel coordinates
       const markedPath = await markPointOnImage(screenshotPath, pixelX, pixelY, undefined, coords.boundingBox);
