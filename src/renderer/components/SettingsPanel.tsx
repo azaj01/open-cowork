@@ -3151,11 +3151,13 @@ function ScheduleTab() {
     if (!isElectron) return;
     setIsLoading(true);
     setError('');
+    setSuccess('');
     try {
       const updated = await window.electronAPI.schedule.toggle(task.id, !task.enabled);
       if (!updated) {
         throw new Error('任务不存在或已被删除');
       }
+      setSuccess(updated.enabled ? '任务已启用' : '任务已停用（不会中断已在执行中的会话）');
       await loadTasks();
     } catch (err) {
       setError(err instanceof Error ? err.message : '切换状态失败');
@@ -3332,6 +3334,9 @@ function ScheduleTab() {
       </div>
 
       <div className="space-y-2">
+        <div className="text-xs text-text-muted">
+          说明：停用仅阻止后续自动触发，已开始执行的会话需在会话列表中手动停止。
+        </div>
         {tasks.length === 0 ? (
           <div className="text-sm text-text-muted text-center py-6 border border-dashed border-border rounded-xl">
             暂无定时任务

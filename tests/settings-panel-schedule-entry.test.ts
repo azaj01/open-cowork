@@ -37,4 +37,8 @@ describe('SettingsPanel schedule tab entry', () => {
     expect(settingsPanelContent).toContain('上次执行：{task.lastRunAt === null ? \'尚未执行\' : formatTime(task.lastRunAt)}');
     expect(settingsPanelContent).toContain('最近会话：{task.lastRunSessionId}');
   });
+
+  it('shows clear stop semantics hint', () => {
+    expect(settingsPanelContent).toContain('停用仅阻止后续自动触发，已开始执行的会话需在会话列表中手动停止');
+  });
 });

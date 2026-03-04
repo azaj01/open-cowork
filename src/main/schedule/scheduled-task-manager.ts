@@ -156,6 +156,12 @@ export class ScheduledTaskManager {
   toggle(id: string, enabled: boolean): ScheduledTask | null {
     const current = this.store.get(id);
     if (!current) return null;
+    if (enabled && !isRepeatingTask(current)) {
+      const oneTimeRunAt = current.nextRunAt ?? current.runAt;
+      if (oneTimeRunAt <= this.now()) {
+        throw new Error('一次性任务执行时间已过，请先编辑任务时间再启用');
+      }
+    }
     const nextRunAt = enabled ? this.computeToggleNextRunAt(current) : null;
     const updated = this.store.update(id, { enabled, nextRunAt });
     if (!updated) return null;

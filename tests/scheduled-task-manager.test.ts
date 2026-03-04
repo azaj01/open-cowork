@@ -371,4 +371,25 @@ describe('ScheduledTaskManager', () => {
     const ids = manager.list().map((task) => task.id);
     expect(ids).toEqual(['enabled-soon', 'enabled-late', 'disabled']);
   });
+
+  it('rejects enabling overdue one-time task to avoid immediate execution', () => {
+    const now = Date.now();
+    const store = createStore([
+      createTask({
+        id: 'toggle-once-overdue',
+        enabled: false,
+        runAt: now - 60_000,
+        nextRunAt: null,
+        repeatEvery: null,
+        repeatUnit: null,
+      }),
+    ]);
+    const executeTask = vi.fn().mockResolvedValue({ sessionId: 'session-toggle-once-overdue' });
+    const manager = new ScheduledTaskManager({ store, executeTask, now: () => Date.now() });
+
+    expect(() => manager.toggle('toggle-once-overdue', true)).toThrow('一次性任务执行时间已过');
+    const after = store.get('toggle-once-overdue');
+    expect(after?.enabled).toBe(false);
+    expect(after?.nextRunAt).toBeNull();
+  });
 });
