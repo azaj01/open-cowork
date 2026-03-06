@@ -1,4 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -19,7 +20,10 @@ const PROXY_PORT_START = 18082;
 const PROXY_PORT_END = 18120;
 const PROXY_START_TIMEOUT_MS = 25000;
 const PROXY_STOP_TIMEOUT_MS = 5000;
-const PROXY_REQUIREMENTS_FINGERPRINT = [
+const PROXY_STALE_TTL_MS = 10 * 60 * 1000;
+const PROXY_MAX_POOL_SIZE = 4;
+export const PROXY_RUNTIME_VERSION_FILENAME = 'runtime-version.txt';
+export const PROXY_REQUIREMENTS_FINGERPRINT = [
   `vendor=${PROXY_VENDOR_COMMIT}`,
   'fastapi[standard]>=0.115.11',
   'uvicorn>=0.34.0',
@@ -44,6 +48,16 @@ export interface ClaudeProxyRuntimeState {
 interface ActiveProxyState extends ClaudeProxyRuntimeState {
   process: ChildProcess;
   logs: string[];
+  startedAt: number;
+  lastUsedAt: number;
+  leaseCount: number;
+}
+
+interface ResolvedPythonRuntime {
+  python: string;
+  pythonRoot?: string;
+  env: NodeJS.ProcessEnv;
+  source: 'bundled' | 'venv';
 }
 
 function resolveVendorRoot(): string | null {
@@ -93,7 +107,114 @@ function resolveVenvPython(runtimeRoot: string): string {
 }
 
 function resolveVersionMarker(runtimeRoot: string): string {
-  return path.join(runtimeRoot, 'runtime-version.txt');
+  return path.join(runtimeRoot, PROXY_RUNTIME_VERSION_FILENAME);
+}
+
+function buildBundledPythonEnv(pythonRoot: string): NodeJS.ProcessEnv {
+  const extraSite = path.join(pythonRoot, 'site-packages');
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PYTHONHOME: pythonRoot,
+    PYTHONNOUSERSITE: '1',
+    PYTHONDONTWRITEBYTECODE: '1',
+    PYTHONUTF8: '1',
+  };
+  if (fs.existsSync(extraSite)) {
+    env.PYTHONPATH = [extraSite, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter);
+  }
+  return env;
+}
+
+function hasBundledProxyDependencies(pythonRoot: string): boolean {
+  const sitePackages = path.join(pythonRoot, 'site-packages');
+  if (!fs.existsSync(sitePackages)) {
+    return false;
+  }
+  const markerFile = resolveVersionMarker(pythonRoot);
+  const marker = fs.existsSync(markerFile) ? fs.readFileSync(markerFile, 'utf-8').trim() : '';
+  if (marker !== PROXY_REQUIREMENTS_FINGERPRINT) {
+    return false;
+  }
+
+  const requiredEntries = [
+    path.join(sitePackages, 'fastapi'),
+    path.join(sitePackages, 'uvicorn'),
+    path.join(sitePackages, 'httpx'),
+    path.join(sitePackages, 'pydantic'),
+    path.join(sitePackages, 'litellm'),
+    path.join(sitePackages, 'dotenv'),
+    path.join(sitePackages, 'google', 'auth'),
+    path.join(sitePackages, 'google', 'cloud', 'aiplatform'),
+  ];
+
+  return requiredEntries.every((candidate) => fs.existsSync(candidate));
+}
+
+function resolveResourcesDirCandidates(): string[] {
+  const candidates = [
+    process.env.OPEN_COWORK_RESOURCES_PATH?.trim(),
+    process.resourcesPath?.trim(),
+    path.resolve(process.cwd(), 'resources'),
+    path.resolve(__dirname, '..', '..', '..', 'resources'),
+    path.resolve(__dirname, '..', '..', '..', '..', 'resources'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  return [...new Set(candidates)];
+}
+
+export function resolveBundledPythonCandidate(
+  options: {
+    platform?: NodeJS.Platform;
+    arch?: string;
+    resourcesPath?: string;
+  } = {}
+): string | null {
+  const platform = options.platform ?? process.platform;
+  if (platform !== 'darwin' && platform !== 'linux') {
+    return null;
+  }
+
+  const arch = (options.arch ?? process.arch) === 'arm64' ? 'arm64' : 'x64';
+  const resourcesCandidates = options.resourcesPath
+    ? [options.resourcesPath, ...resolveResourcesDirCandidates()]
+    : resolveResourcesDirCandidates();
+  const candidatePaths = resourcesCandidates.flatMap((resourcesDir) => ([
+    path.join(resourcesDir, 'python', 'bin', 'python3'),
+    path.join(resourcesDir, 'python', `${platform}-${arch}`, 'bin', 'python3'),
+  ]));
+
+  for (const candidate of candidatePaths) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+export function resolveBundledPythonRuntime(
+  options: {
+    platform?: NodeJS.Platform;
+    arch?: string;
+    resourcesPath?: string;
+  } = {}
+): ResolvedPythonRuntime | null {
+  const bundledPython = resolveBundledPythonCandidate(options);
+  if (!bundledPython) {
+    return null;
+  }
+
+  const pythonRoot = path.resolve(bundledPython, '..', '..');
+  if (!hasBundledProxyDependencies(pythonRoot)) {
+    return null;
+  }
+
+  return {
+    python: bundledPython,
+    pythonRoot,
+    env: buildBundledPythonEnv(pythonRoot),
+    source: 'bundled',
+  };
 }
 
 function resolveSystemPythonCandidate(): string {
@@ -120,15 +241,33 @@ function resolveSystemPythonCandidate(): string {
   );
 }
 
-function buildProfileSignature(profile: UnifiedGatewayProfile): string {
-  return [
-    profile.upstreamKind,
-    profile.upstreamBaseUrl,
-    profile.upstreamApiKey,
-    profile.model,
-    profile.provider,
-    profile.customProtocol || 'anthropic',
-  ].join('::');
+function resolveBootstrapPythonCandidate(): string {
+  const explicit = process.env.OPEN_COWORK_PYTHON_PATH?.trim();
+  if (explicit && fs.existsSync(explicit)) {
+    return explicit;
+  }
+
+  const bundled = resolveBundledPythonCandidate();
+  if (bundled) {
+    return bundled;
+  }
+
+  return resolveSystemPythonCandidate();
+}
+
+export function buildProfileSignature(profile: UnifiedGatewayProfile): string {
+  const serialized = JSON.stringify({
+    upstreamKind: profile.upstreamKind,
+    upstreamBaseUrl: profile.upstreamBaseUrl,
+    upstreamApiKey: profile.upstreamApiKey,
+    upstreamHeaders: profile.upstreamHeaders || {},
+    model: profile.model,
+    provider: profile.provider,
+    customProtocol: profile.customProtocol || 'anthropic',
+    openaiAccountId: profile.openaiAccountId || '',
+    useCodexOAuth: Boolean(profile.useCodexOAuth),
+  });
+  return createHash('sha256').update(serialized).digest('hex');
 }
 
 function trimLogs(lines: string[]): string {
@@ -178,26 +317,45 @@ async function findAvailablePort(start = PROXY_PORT_START, end = PROXY_PORT_END)
   throw new Error(`proxy_boot_failed:no_available_port:${start}-${end}`);
 }
 
-function buildProxyEnvironment(profile: UnifiedGatewayProfile): NodeJS.ProcessEnv {
+export function buildProxyEnvironment(profile: UnifiedGatewayProfile): NodeJS.ProcessEnv {
+  const preferredProvider = profile.upstreamKind === 'gemini' ? 'google' : profile.upstreamKind;
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PYTHONUNBUFFERED: '1',
-    PREFERRED_PROVIDER: profile.upstreamKind,
+    PREFERRED_PROVIDER: preferredProvider,
     BIG_MODEL: profile.model,
     SMALL_MODEL: profile.model,
     ANTHROPIC_API_KEY: '',
+    ANTHROPIC_AUTH_TOKEN: '',
     ANTHROPIC_BASE_URL: '',
     OPENAI_API_KEY: '',
     OPENAI_BASE_URL: '',
+    OPENAI_ACCOUNT_ID: '',
+    OPENAI_CODEX_OAUTH: '0',
+    OPENAI_DEFAULT_HEADERS_JSON: '',
     GEMINI_API_KEY: '',
+    GEMINI_BASE_URL: '',
+    USE_VERTEX_AUTH: '0',
+    VERTEX_PROJECT: '',
+    VERTEX_LOCATION: '',
   };
 
   if (profile.upstreamKind === 'openai') {
     env.OPENAI_API_KEY = profile.upstreamApiKey;
     env.OPENAI_BASE_URL = profile.upstreamBaseUrl;
-  } else {
+    env.OPENAI_CODEX_OAUTH = profile.useCodexOAuth ? '1' : '0';
+    if (profile.openaiAccountId) {
+      env.OPENAI_ACCOUNT_ID = profile.openaiAccountId;
+    }
+    if (profile.upstreamHeaders && Object.keys(profile.upstreamHeaders).length > 0) {
+      env.OPENAI_DEFAULT_HEADERS_JSON = JSON.stringify(profile.upstreamHeaders);
+    }
+  } else if (profile.upstreamKind === 'anthropic') {
     env.ANTHROPIC_API_KEY = profile.upstreamApiKey;
     env.ANTHROPIC_BASE_URL = profile.upstreamBaseUrl;
+  } else {
+    env.GEMINI_API_KEY = profile.upstreamApiKey;
+    env.GEMINI_BASE_URL = profile.upstreamBaseUrl;
   }
 
   return env;
@@ -230,7 +388,8 @@ async function waitForHealthy(baseUrl: string, processRef: ChildProcess, logs: s
 }
 
 export class ClaudeProxyManager {
-  private activeState: ActiveProxyState | null = null;
+  private activeStates = new Map<string, ActiveProxyState>();
+  private latestSignature: string | null = null;
   private operationQueue: Promise<unknown> = Promise.resolve();
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -244,10 +403,17 @@ export class ClaudeProxyManager {
   }
 
   getCurrentState(): ClaudeProxyRuntimeState | null {
-    if (!this.activeState) {
+    const latest = this.latestSignature ? this.activeStates.get(this.latestSignature) : null;
+    if (latest && latest.process.exitCode === null) {
+      const { process: _ignored, logs: _logs, ...rest } = latest;
+      return rest;
+    }
+
+    const fallback = Array.from(this.activeStates.values()).find((state) => state.process.exitCode === null);
+    if (!fallback) {
       return null;
     }
-    const { process: _ignored, logs: _logs, ...rest } = this.activeState;
+    const { process: _ignored, logs: _logs, ...rest } = fallback;
     return rest;
   }
 
@@ -277,12 +443,13 @@ export class ClaudeProxyManager {
     }
     const decision = this.resolveRoute(config);
     if (!decision.ok || !decision.profile) {
-      await this.stop();
       logWarn('[ClaudeProxy] Skip warmup due to unresolved route', {
         reason: decision.reason,
         provider: config.provider,
         customProtocol: config.customProtocol,
+        liveProxyCount: this.getLiveStates().length,
       });
+      await this.pruneStaleStates(new Set());
       return;
     }
     await this.ensureReady(decision.profile);
@@ -295,24 +462,114 @@ export class ClaudeProxyManager {
       }
 
       const signature = buildProfileSignature(profile);
-      if (this.activeState && this.activeState.signature === signature && this.activeState.process.exitCode === null) {
-        const { process: _process, logs: _logs, ...rest } = this.activeState;
+      const existingState = this.activeStates.get(signature);
+      if (existingState && existingState.process.exitCode === null) {
+        existingState.lastUsedAt = Date.now();
+        this.latestSignature = signature;
+        await this.pruneStaleStates(new Set([signature]));
+        const { process: _process, logs: _logs, ...rest } = existingState;
         return rest;
       }
 
-      await this.stopInternal();
-      const runtime = await this.startInternal(profile, signature);
-      return runtime;
+      const startedState = await this.startInternal(profile, signature);
+      this.activeStates.set(signature, startedState);
+      this.latestSignature = signature;
+      await this.pruneStaleStates(new Set([signature]));
+      const { process: _process, logs: _logs, ...rest } = startedState;
+      return rest;
+    });
+  }
+
+  retain(signature: string): void {
+    const state = this.activeStates.get(signature);
+    if (!state || state.process.exitCode !== null) {
+      return;
+    }
+    state.leaseCount += 1;
+    state.lastUsedAt = Date.now();
+  }
+
+  async release(signature: string): Promise<void> {
+    await this.enqueue(async () => {
+      const state = this.activeStates.get(signature);
+      if (!state || state.process.exitCode !== null) {
+        return;
+      }
+      state.leaseCount = Math.max(0, state.leaseCount - 1);
+      state.lastUsedAt = Date.now();
+      if (state.leaseCount === 0) {
+        await this.pruneStaleStates(new Set());
+      }
     });
   }
 
   async stop(): Promise<void> {
     await this.enqueue(async () => {
-      await this.stopInternal();
+      const states = Array.from(this.activeStates.values());
+      for (const state of states) {
+        await this.stopStateInternal(state);
+      }
+      this.activeStates.clear();
+      this.latestSignature = null;
     });
   }
 
-  private async ensurePythonRuntime(vendorRoot: string): Promise<string> {
+  private getLiveStates(): ActiveProxyState[] {
+    return Array.from(this.activeStates.values()).filter((state) => state.process.exitCode === null);
+  }
+
+  private removeState(signature: string, state?: ActiveProxyState): void {
+    const existing = this.activeStates.get(signature);
+    if (!existing) {
+      return;
+    }
+    if (state && existing !== state) {
+      return;
+    }
+    this.activeStates.delete(signature);
+    if (this.latestSignature === signature) {
+      this.latestSignature = this.getLiveStates().at(-1)?.signature || null;
+    }
+  }
+
+  private async pruneStaleStates(keepSignatures: Set<string>): Promise<void> {
+    const now = Date.now();
+    const liveStates = this.getLiveStates();
+    const staleCandidates = liveStates
+      .filter((state) => !keepSignatures.has(state.signature) && state.leaseCount === 0)
+      .sort((left, right) => left.lastUsedAt - right.lastUsedAt);
+    const statesToStop: ActiveProxyState[] = [];
+
+    for (const state of staleCandidates) {
+      if (now - state.lastUsedAt > PROXY_STALE_TTL_MS) {
+        statesToStop.push(state);
+      }
+    }
+
+    let remainingLiveCount = liveStates.length - statesToStop.length;
+    for (const state of staleCandidates) {
+      if (remainingLiveCount <= PROXY_MAX_POOL_SIZE) {
+        break;
+      }
+      if (statesToStop.includes(state)) {
+        continue;
+      }
+      statesToStop.push(state);
+      remainingLiveCount -= 1;
+    }
+
+    for (const state of statesToStop) {
+      await this.stopStateInternal(state);
+      this.removeState(state.signature, state);
+    }
+  }
+
+  private async ensurePythonRuntime(vendorRoot: string): Promise<ResolvedPythonRuntime> {
+    const bundledRuntime = resolveBundledPythonRuntime();
+    if (bundledRuntime) {
+      return bundledRuntime;
+    }
+
     const runtimeRoot = resolveRuntimeRoot();
     fs.mkdirSync(runtimeRoot, { recursive: true });
 
@@ -321,10 +578,14 @@ export class ClaudeProxyManager {
     const marker = fs.existsSync(markerFile) ? fs.readFileSync(markerFile, 'utf-8').trim() : '';
 
     if (fs.existsSync(venvPython) && marker === PROXY_REQUIREMENTS_FINGERPRINT) {
-      return venvPython;
+      return {
+        python: venvPython,
+        env: { ...process.env },
+        source: 'venv',
+      };
     }
 
-    const bootstrapPython = resolveSystemPythonCandidate();
+    const bootstrapPython = resolveBootstrapPythonCandidate();
     if (!fs.existsSync(venvPython)) {
       execFileSync(bootstrapPython, ['-m', 'venv', path.join(runtimeRoot, 'venv')], {
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -350,30 +611,37 @@ export class ClaudeProxyManager {
     );
 
     fs.writeFileSync(markerFile, PROXY_REQUIREMENTS_FINGERPRINT, 'utf-8');
-    return venvPython;
+    return {
+      python: venvPython,
+      env: { ...process.env },
+      source: 'venv',
+    };
   }
 
   private async startInternal(
     profile: UnifiedGatewayProfile,
     signature: string
-  ): Promise<ClaudeProxyRuntimeState> {
+  ): Promise<ActiveProxyState> {
     const vendorRoot = resolveVendorRoot();
     if (!vendorRoot) {
       throw new Error('proxy_boot_failed:vendor_not_found');
     }
     log('[ClaudeProxy] Resolved vendor root', { vendorRoot });
 
-    const venvPython = await this.ensurePythonRuntime(vendorRoot);
+    const pythonRuntime = await this.ensurePythonRuntime(vendorRoot);
     const port = await findAvailablePort();
     const baseUrl = `http://${PROXY_HOST}:${port}`;
 
     const logs: string[] = [];
     const child = spawn(
-      venvPython,
+      pythonRuntime.python,
       ['-m', 'uvicorn', 'server:app', '--host', PROXY_HOST, '--port', String(port), '--log-level', 'warning'],
       {
         cwd: vendorRoot,
-        env: buildProxyEnvironment(profile),
+        env: {
+          ...pythonRuntime.env,
+          ...buildProxyEnvironment(profile),
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
       }
     );
@@ -401,7 +669,8 @@ export class ClaudeProxyManager {
       throw error;
     }
 
-    this.activeState = {
+    const now = Date.now();
+    const state: ActiveProxyState = {
       baseUrl,
       host: PROXY_HOST,
       port,
@@ -411,7 +680,13 @@ export class ClaudeProxyManager {
       pid: child.pid || -1,
       process: child,
       logs,
+      startedAt: now,
+      lastUsedAt: now,
+      leaseCount: 0,
     };
+    child.once('exit', () => {
+      this.removeState(signature, state);
+    });
 
     log('[ClaudeProxy] Started', {
       baseUrl,
@@ -420,30 +695,28 @@ export class ClaudeProxyManager {
       provider: profile.provider,
       customProtocol: profile.customProtocol,
       vendorCommit: PROXY_VENDOR_COMMIT,
+      pythonSource: pythonRuntime.source,
     });
 
-    const { process: _process, logs: _logs, ...runtime } = this.activeState;
-    return runtime;
+    return state;
   }
 
-  private async stopInternal(): Promise<void> {
-    if (!this.activeState) {
+  private async stopStateInternal(state: ActiveProxyState): Promise<void> {
+    if (state.process.exitCode !== null) {
+      this.removeState(state.signature, state);
       return;
     }
 
-    const active = this.activeState;
-    this.activeState = null;
-
     try {
-      if (active.process.exitCode === null) {
-        active.process.kill('SIGTERM');
+      if (state.process.exitCode === null) {
+        state.process.kill('SIGTERM');
       }
-      await waitForProcessExit(active.process, PROXY_STOP_TIMEOUT_MS);
-      if (active.process.exitCode === null) {
-        active.process.kill('SIGKILL');
-        await waitForProcessExit(active.process, 1500);
+      await waitForProcessExit(state.process, PROXY_STOP_TIMEOUT_MS);
+      if (state.process.exitCode === null) {
+        state.process.kill('SIGKILL');
+        await waitForProcessExit(state.process, 1500);
       }
-      if (active.process.exitCode === null) {
+      if (state.process.exitCode === null) {
         throw new Error('proxy_stop_failed:process_still_running_after_sigkill');
       }
     } catch (error) {
@@ -451,9 +724,10 @@ export class ClaudeProxyManager {
       throw error;
     }
 
+    this.removeState(state.signature, state);
     log('[ClaudeProxy] Stopped', {
-      pid: active.pid,
-      port: active.port,
+      pid: state.pid,
+      port: state.port,
     });
   }
 }

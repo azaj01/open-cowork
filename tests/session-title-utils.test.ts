@@ -58,4 +58,9 @@ describe('session title utils', () => {
     const title = normalizeGeneratedTitle('"  我的标题  "\n第二行');
     expect(title).toBe('我的标题');
   });
+
+  it('drops synthetic empty placeholder titles', () => {
+    expect(normalizeGeneratedTitle('(no content)')).toBeNull();
+    expect(normalizeGeneratedTitle('(empty content)')).toBeNull();
+  });
 });

@@ -8,6 +8,42 @@ vi.mock('electron', () => ({
   },
 }));
 
+vi.mock('electron-store', () => {
+  class MockStore<T extends Record<string, unknown>> {
+    public store: Record<string, unknown>;
+    public path = '/tmp/mock-session-manager-openai-failover-config-store.json';
+
+    constructor(options: { defaults?: Record<string, unknown> }) {
+      this.store = {
+        ...(options?.defaults || {}),
+      };
+    }
+
+    get<K extends keyof T>(key: K): T[K] {
+      return this.store[key as string] as T[K];
+    }
+
+    set(key: string | Record<string, unknown>, value?: unknown): void {
+      if (typeof key === 'string') {
+        this.store[key] = value;
+        return;
+      }
+      this.store = {
+        ...this.store,
+        ...key,
+      };
+    }
+
+    clear(): void {
+      this.store = {};
+    }
+  }
+
+  return {
+    default: MockStore,
+  };
+});
+
 vi.mock('../src/main/mcp/mcp-config-store', () => ({
   mcpConfigStore: {
     getEnabledServers: () => [],
@@ -54,18 +90,21 @@ describe('SessionManager OpenAI failover guard', () => {
     provider: configStore.get('provider'),
     customProtocol: configStore.get('customProtocol'),
     apiKey: configStore.get('apiKey'),
+    baseUrl: configStore.get('baseUrl'),
   };
 
   beforeEach(() => {
     configStore.set('provider', 'openai');
     configStore.set('customProtocol', 'openai');
     configStore.set('apiKey', 'sk-test');
+    configStore.set('baseUrl', 'https://api.openai.com/v1');
   });
 
   afterEach(() => {
     configStore.set('provider', previous.provider);
     configStore.set('customProtocol', previous.customProtocol);
     configStore.set('apiKey', previous.apiKey);
+    configStore.set('baseUrl', previous.baseUrl);
     vi.restoreAllMocks();
   });
 

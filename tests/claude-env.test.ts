@@ -40,11 +40,15 @@ describe('buildClaudeEnv', () => {
     const shellEnv = {
       ANTHROPIC_API_KEY: 'old-key',
       OPENAI_API_KEY: 'old-openai',
+      GEMINI_API_KEY: 'old-gemini',
+      GEMINI_BASE_URL: 'https://gemini.example',
       PATH: '/bin',
     };
     const env = buildClaudeEnv(shellEnv);
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.GEMINI_API_KEY).toBeUndefined();
+    expect(env.GEMINI_BASE_URL).toBeUndefined();
     expect(env.PATH).toBe('/bin');
   });
 });

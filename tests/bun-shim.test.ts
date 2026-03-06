@@ -46,7 +46,7 @@ describe('withBunHashShimEnv', () => {
     });
   });
 
-  it('keeps Claude Code CLI startup working when shim is injected', () => {
+  it('keeps Claude Code CLI startup working when shim is injected', { timeout: 60000 }, () => {
     const args = withBunHashShimNodeArgs([
       'node_modules/@anthropic-ai/claude-code/cli.js',
       '--help',

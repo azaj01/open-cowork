@@ -8,6 +8,42 @@ vi.mock('electron', () => ({
   },
 }));
 
+vi.mock('electron-store', () => {
+  class MockStore<T extends Record<string, unknown>> {
+    public store: Record<string, unknown>;
+    public path = '/tmp/mock-session-manager-runner-selection-config-store.json';
+
+    constructor(options: { defaults?: Record<string, unknown> }) {
+      this.store = {
+        ...(options?.defaults || {}),
+      };
+    }
+
+    get<K extends keyof T>(key: K): T[K] {
+      return this.store[key as string] as T[K];
+    }
+
+    set(key: string | Record<string, unknown>, value?: unknown): void {
+      if (typeof key === 'string') {
+        this.store[key] = value;
+        return;
+      }
+      this.store = {
+        ...this.store,
+        ...key,
+      };
+    }
+
+    clear(): void {
+      this.store = {};
+    }
+  }
+
+  return {
+    default: MockStore,
+  };
+});
+
 vi.mock('../src/main/claude/agent-runner', () => ({
   ClaudeAgentRunner: class {
     run = vi.fn();
@@ -51,6 +87,7 @@ describe('SessionManager runner selection', () => {
     provider: configStore.get('provider'),
     customProtocol: configStore.get('customProtocol'),
     apiKey: configStore.get('apiKey'),
+    baseUrl: configStore.get('baseUrl'),
     disableClaudeUnified: process.env.COWORK_DISABLE_CLAUDE_UNIFIED,
     forceClaudeAgentSdk: process.env.COWORK_FORCE_CLAUDE_AGENT_SDK,
   };
@@ -59,6 +96,7 @@ describe('SessionManager runner selection', () => {
     configStore.set('provider', 'openai');
     configStore.set('customProtocol', 'openai');
     configStore.set('apiKey', 'sk-test');
+    configStore.set('baseUrl', 'https://api.openai.com/v1');
     delete process.env.COWORK_DISABLE_CLAUDE_UNIFIED;
     delete process.env.COWORK_FORCE_CLAUDE_AGENT_SDK;
   });
@@ -67,6 +105,7 @@ describe('SessionManager runner selection', () => {
     configStore.set('provider', previous.provider);
     configStore.set('customProtocol', previous.customProtocol);
     configStore.set('apiKey', previous.apiKey);
+    configStore.set('baseUrl', previous.baseUrl);
     if (previous.disableClaudeUnified === undefined) {
       delete process.env.COWORK_DISABLE_CLAUDE_UNIFIED;
     } else {

@@ -18,10 +18,11 @@ import { extractArtifactsFromText, buildArtifactTraceSteps } from '../utils/arti
 import { buildMcpToolsPrompt } from '../utils/cowork-instructions';
 import { buildClaudeEnv, getClaudeEnvOverrides } from './claude-env';
 import { buildThinkingOptions } from './thinking-options';
+import { isSyntheticAssistantTextBlock } from './assistant-text-filter';
 import { PluginRuntimeService } from '../skills/plugin-runtime-service';
 import { configStore } from '../config/config-store';
 import { resolveClaudeCodeExecutablePath } from './claude-code-path';
-import { isClaudeUnifiedModeEnabled } from '../session/claude-unified-mode';
+import { shouldUseUnifiedClaudeProxy, shouldUseUnifiedClaudeSdk } from '../session/claude-unified-mode';
 import { resolveUnifiedGatewayProfile } from './unified-gateway-resolver';
 import { claudeProxyManager } from '../proxy/claude-proxy-manager';
 import { isNodeExecutable, withBunHashShimEnv, withBunHashShimNodeArgs } from './bun-shim';
@@ -173,12 +174,14 @@ function toUserFacingErrorText(errorText: string): string {
   if (errorText.toLowerCase().includes('first_response_timeout')) {
     return '模型响应超时：长时间未收到上游返回，请稍后重试或检查当前模型/网关负载。';
   }
+  if (errorText.toLowerCase().includes('empty_success_result')) {
+    return '模型返回了一个空的成功结果，当前模型或网关兼容性可能有问题，请重试或切换协议后再试。';
+  }
   return errorText;
 }
 
 function isSyntheticEmptyAssistantText(text: string): boolean {
-  const normalized = text.trim().toLowerCase();
-  return normalized === '(no content)' || normalized === '(empty content)';
+  return isSyntheticAssistantTextBlock(text);
 }
 
 function redactEnvForLog(env: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv | undefined {
@@ -1004,6 +1007,7 @@ Then follow the workflow described in that file.
     // Sandbox isolation state (defined outside try for finally access)
     let sandboxPath: string | null = null;
     let useSandboxIsolation = false;
+    let proxyLeaseSignature: string | null = null;
     
     // Track last executed tool for completion message generation
     let lastExecutedToolName: string | null = null;
@@ -1529,9 +1533,8 @@ Then follow the workflow described in that file.
       logTiming('after getShellEnvironment');
 
       const runtimeConfig = configStore.getAll();
-      const unifiedProxyEnabled =
-        isClaudeUnifiedModeEnabled() &&
-        process.env.COWORK_DISABLE_CLAUDE_PROXY !== '1';
+      const unifiedSdkEnabled = shouldUseUnifiedClaudeSdk(runtimeConfig);
+      const unifiedProxyEnabled = shouldUseUnifiedClaudeProxy(runtimeConfig);
 
       let runtimeConfigForSdk = runtimeConfig;
       let envOverrides = getClaudeEnvOverrides(runtimeConfigForSdk);
@@ -1548,6 +1551,8 @@ Then follow the workflow described in that file.
           throw new Error(`proxy_upstream_not_found:${reason}`);
         }
         const proxyRuntime = await claudeProxyManager.ensureReady(route.profile);
+        claudeProxyManager.retain(proxyRuntime.signature);
+        proxyLeaseSignature = proxyRuntime.signature;
         runtimeConfigForSdk = {
           ...runtimeConfig,
           model: route.profile.model,
@@ -2114,6 +2119,7 @@ When you produce a final deliverable file, declare it once using this exact bloc
       let shouldContinue = true;
       let sdkApiKeySource: string | null = null;
       let lastAssistantApiErrorText = '';
+      let emittedVisibleOutput = false;
       const firstResponseTimeoutFromEnv = Number.parseInt(process.env.COWORK_FIRST_RESPONSE_TIMEOUT_MS || '120000', 10);
       const firstResponseTimeoutMs = Number.isFinite(firstResponseTimeoutFromEnv) && firstResponseTimeoutFromEnv > 0
         ? firstResponseTimeoutFromEnv
@@ -2275,10 +2281,7 @@ When you produce a final deliverable file, declare it once using this exact bloc
               const provider = configStore.get('provider');
               const customProtocol = configStore.get('customProtocol');
               const isOpenAIProfile = provider === 'openai' || (provider === 'custom' && customProtocol === 'openai');
-              const unifiedProxyEnabled =
-                isClaudeUnifiedModeEnabled() &&
-                process.env.COWORK_DISABLE_CLAUDE_PROXY !== '1';
-              if (isOpenAIProfile && !unifiedProxyEnabled) {
+              if (isOpenAIProfile && !unifiedSdkEnabled) {
                 const runtimeBaseUrl = envWithSkills.OPENAI_BASE_URL || envWithSkills.ANTHROPIC_BASE_URL || '(default)';
                 const hint = `\n\n[Config hint] Runtime profile is ${provider}/${customProtocol || 'anthropic'} with base URL ${runtimeBaseUrl}. Claude Code reports apiKeySource=none, which means OPENAI_* credentials were not accepted in this SDK path. Try switching to Custom + Anthropic protocol for the same gateway, then save and retry.`;
                 textContent += hint;
@@ -2344,6 +2347,7 @@ When you produce a final deliverable file, declare it once using this exact bloc
             // Send message to UI
             if (contentBlocks.length > 0) {
               log('[ClaudeAgentRunner] Sending assistant message with', contentBlocks.length, 'blocks');
+              emittedVisibleOutput = true;
               const assistantMsg: Message = {
                 id: uuidv4(),
                 sessionId: session.id,
@@ -2433,6 +2437,7 @@ When you produce a final deliverable file, declare it once using this exact bloc
                   }],
                   timestamp: Date.now(),
                 };
+                emittedVisibleOutput = true;
                 this.sendMessage(session.id, toolResultMsg);
               }
             }
@@ -2488,6 +2493,9 @@ When you produce a final deliverable file, declare it once using this exact bloc
           // This happens when Claude calls tools but doesn't generate follow-up text
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const finalResultText = (message as any).result as string || '';
+          if (!finalResultText.trim() && !emittedVisibleOutput) {
+            throw new Error('empty_success_result: upstream returned success with no visible assistant content');
+          }
           if (!finalResultText.trim() && lastExecutedToolName) {
             log(`[ClaudeAgentRunner] Empty result after tool execution (${lastExecutedToolName}), adding completion message`);
             
@@ -2507,6 +2515,7 @@ When you produce a final deliverable file, declare it once using this exact bloc
             }
             
             if (completionText) {
+              emittedVisibleOutput = true;
               const completionMsg: Message = {
                 id: uuidv4(),
                 sessionId: session.id,
@@ -2646,6 +2655,9 @@ When you produce a final deliverable file, declare it once using this exact bloc
         });
       }
     } finally {
+      if (proxyLeaseSignature) {
+        await claudeProxyManager.release(proxyLeaseSignature);
+      }
       this.activeControllers.delete(session.id);
       this.pathResolver.unregisterSession(session.id);
 

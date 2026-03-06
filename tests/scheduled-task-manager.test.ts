@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ScheduledTaskManager,
+  type ScheduledTaskScheduleConfig,
   type ScheduledTask,
   type ScheduledTaskStore,
 } from '../src/main/schedule/scheduled-task-manager';
@@ -16,6 +17,7 @@ function createTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     runAt: now,
     nextRunAt: now,
     enabled: true,
+    scheduleConfig: null,
     repeatEvery: null,
     repeatUnit: null,
     lastRunAt: null,
@@ -25,6 +27,27 @@ function createTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     updatedAt: now,
     ...overrides,
   };
+}
+
+function toLocalTimestamp(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number
+): number {
+  return new Date(year, month - 1, day, hour, minute, 0, 0).getTime();
+}
+
+function createDailySchedule(times: string[]): ScheduledTaskScheduleConfig {
+  return { kind: 'daily', times };
+}
+
+function createWeeklySchedule(
+  weekdays: number[],
+  times: string[]
+): ScheduledTaskScheduleConfig {
+  return { kind: 'weekly', weekdays, times };
 }
 
 function createStore(initialTasks: ScheduledTask[]): ScheduledTaskStore {
@@ -393,6 +416,50 @@ describe('ScheduledTaskManager', () => {
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(executeTask).toHaveBeenCalledTimes(0);
+  });
+
+  it('advances daily multi-slot schedule to the next time slot after execution', async () => {
+    const now = toLocalTimestamp(2026, 3, 2, 6, 30);
+    vi.setSystemTime(now);
+    const store = createStore([
+      createTask({
+        id: 'daily-multi-slot',
+        runAt: toLocalTimestamp(2026, 3, 2, 6, 30),
+        nextRunAt: toLocalTimestamp(2026, 3, 2, 6, 30),
+        scheduleConfig: createDailySchedule(['04:00', '06:30', '08:00']),
+      }),
+    ]);
+    const executeTask = vi.fn().mockResolvedValue({ sessionId: 'session-daily-multi-slot' });
+    const manager = new ScheduledTaskManager({ store, executeTask, now: () => Date.now() });
+    manager.start();
+
+    await vi.runOnlyPendingTimersAsync();
+
+    const after = store.get('daily-multi-slot');
+    expect(executeTask).toHaveBeenCalledTimes(1);
+    expect(after?.enabled).toBe(true);
+    expect(after?.nextRunAt).toBe(toLocalTimestamp(2026, 3, 2, 8, 0));
+  });
+
+  it('re-enables weekly multi-slot schedule with the nearest future weekday slot', () => {
+    const now = toLocalTimestamp(2026, 3, 3, 9, 15);
+    vi.setSystemTime(now);
+    const store = createStore([
+      createTask({
+        id: 'weekly-multi-slot',
+        enabled: false,
+        runAt: toLocalTimestamp(2026, 3, 2, 8, 0),
+        nextRunAt: null,
+        scheduleConfig: createWeeklySchedule([1, 4], ['00:30', '01:00', '08:00']),
+      }),
+    ]);
+    const executeTask = vi.fn().mockResolvedValue({ sessionId: 'session-weekly-multi-slot' });
+    const manager = new ScheduledTaskManager({ store, executeTask, now: () => Date.now() });
+
+    const toggled = manager.toggle('weekly-multi-slot', true);
+
+    expect(toggled?.enabled).toBe(true);
+    expect(toggled?.nextRunAt).toBe(toLocalTimestamp(2026, 3, 5, 0, 30));
   });
 
   it('sorts list by enabled then nearest nextRunAt', () => {

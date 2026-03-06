@@ -110,6 +110,20 @@ export type TraceStepType = 'thinking' | 'text' | 'tool_call' | 'tool_result';
 export type TraceStepStatus = 'pending' | 'running' | 'completed' | 'error';
 
 export type ScheduleRepeatUnit = 'minute' | 'hour' | 'day';
+export type ScheduleWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+export interface DailyScheduleConfig {
+  kind: 'daily';
+  times: string[];
+}
+
+export interface WeeklyScheduleConfig {
+  kind: 'weekly';
+  weekdays: ScheduleWeekday[];
+  times: string[];
+}
+
+export type ScheduleConfig = DailyScheduleConfig | WeeklyScheduleConfig;
 
 export interface ScheduleTask {
   id: string;
@@ -118,6 +132,7 @@ export interface ScheduleTask {
   cwd: string;
   runAt: number;
   nextRunAt: number | null;
+  scheduleConfig: ScheduleConfig | null;
   repeatEvery: number | null;
   repeatUnit: ScheduleRepeatUnit | null;
   enabled: boolean;
@@ -134,6 +149,7 @@ export interface ScheduleCreateInput {
   cwd: string;
   runAt: number;
   nextRunAt?: number | null;
+  scheduleConfig?: ScheduleConfig | null;
   repeatEvery?: number | null;
   repeatUnit?: ScheduleRepeatUnit | null;
   enabled?: boolean;
@@ -145,6 +161,7 @@ export interface ScheduleUpdateInput {
   cwd?: string;
   runAt?: number;
   nextRunAt?: number | null;
+  scheduleConfig?: ScheduleConfig | null;
   repeatEvery?: number | null;
   repeatUnit?: ScheduleRepeatUnit | null;
   enabled?: boolean;
@@ -401,9 +418,16 @@ export interface ExecutionContext {
 }
 
 // App Config types
-export type ProviderType = 'openrouter' | 'anthropic' | 'custom' | 'openai';
-export type CustomProtocolType = 'anthropic' | 'openai';
-export type ProviderProfileKey = 'openrouter' | 'anthropic' | 'openai' | 'custom:anthropic' | 'custom:openai';
+export type ProviderType = 'openrouter' | 'anthropic' | 'custom' | 'openai' | 'gemini';
+export type CustomProtocolType = 'anthropic' | 'openai' | 'gemini';
+export type ProviderProfileKey =
+  | 'openrouter'
+  | 'anthropic'
+  | 'openai'
+  | 'gemini'
+  | 'custom:anthropic'
+  | 'custom:openai'
+  | 'custom:gemini';
 export type ConfigSetId = string;
 
 export interface ProviderProfile {
@@ -463,6 +487,7 @@ export interface ProviderPresets {
   anthropic: ProviderPreset;
   custom: ProviderPreset;
   openai: ProviderPreset;
+  gemini: ProviderPreset;
 }
 
 export interface ApiTestInput {

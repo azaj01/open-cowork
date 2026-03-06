@@ -238,3 +238,11 @@ export function shouldAllowEmptyOpenAIApiKey(
     && (config.customProtocol ?? 'anthropic') === 'openai'
     && isLoopbackBaseUrl(config.baseUrl);
 }
+
+export function shouldAllowEmptyGeminiApiKey(
+  config: Pick<AppConfig, 'provider' | 'customProtocol' | 'baseUrl'>
+): boolean {
+  return config.provider === 'custom'
+    && (config.customProtocol ?? 'anthropic') === 'gemini'
+    && isLoopbackBaseUrl(config.baseUrl);
+}

@@ -24,6 +24,7 @@ export function createScheduledTaskStore(db: DatabaseInstance): ScheduledTaskSto
         cwd: input.cwd,
         run_at: input.runAt,
         next_run_at: input.nextRunAt ?? input.runAt,
+        schedule_config: input.scheduleConfig ? JSON.stringify(input.scheduleConfig) : null,
         repeat_every: input.repeatEvery ?? null,
         repeat_unit: input.repeatUnit ?? null,
         enabled: input.enabled === false ? 0 : 1,
@@ -59,6 +60,7 @@ function mapRowToTask(row: ScheduledTaskRow): ScheduledTask {
     cwd: row.cwd,
     runAt: row.run_at,
     nextRunAt: row.next_run_at,
+    scheduleConfig: parseScheduleConfig(row.schedule_config),
     repeatEvery: row.repeat_every,
     repeatUnit: row.repeat_unit as ScheduledTask['repeatUnit'],
     enabled: row.enabled === 1,
@@ -77,6 +79,9 @@ function mapTaskUpdatesToRow(updates: ScheduledTaskUpdateInput): Partial<Schedul
   if (updates.cwd !== undefined) mapped.cwd = updates.cwd;
   if (updates.runAt !== undefined) mapped.run_at = updates.runAt;
   if (updates.nextRunAt !== undefined) mapped.next_run_at = updates.nextRunAt;
+  if (updates.scheduleConfig !== undefined) {
+    mapped.schedule_config = updates.scheduleConfig ? JSON.stringify(updates.scheduleConfig) : null;
+  }
   if (updates.repeatEvery !== undefined) mapped.repeat_every = updates.repeatEvery;
   if (updates.repeatUnit !== undefined) mapped.repeat_unit = updates.repeatUnit;
   if (updates.enabled !== undefined) mapped.enabled = updates.enabled ? 1 : 0;
@@ -84,4 +89,15 @@ function mapTaskUpdatesToRow(updates: ScheduledTaskUpdateInput): Partial<Schedul
   if (updates.lastRunSessionId !== undefined) mapped.last_run_session_id = updates.lastRunSessionId;
   if (updates.lastError !== undefined) mapped.last_error = updates.lastError;
   return mapped;
+}
+
+function parseScheduleConfig(value: string | null): ScheduledTask['scheduleConfig'] {
+  if (!value) {
+    return null;
+  }
+  try {
+    return JSON.parse(value) as ScheduledTask['scheduleConfig'];
+  } catch {
+    return null;
+  }
 }

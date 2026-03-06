@@ -123,8 +123,15 @@ describe('ClaudeAgentRunner plugin runtime integration', () => {
   });
 
   it('suppresses synthetic empty assistant text placeholders from SDK', () => {
+    expect(agentRunnerContent).toContain("import { isSyntheticAssistantTextBlock } from './assistant-text-filter'");
     expect(agentRunnerContent).toContain('function isSyntheticEmptyAssistantText');
-    expect(agentRunnerContent).toContain("normalized === '(no content)' || normalized === '(empty content)'");
+    expect(agentRunnerContent).toContain('return isSyntheticAssistantTextBlock(text);');
     expect(agentRunnerContent).toContain('Suppressing synthetic empty assistant text block');
+  });
+
+  it('treats empty success results without visible output as failures', () => {
+    expect(agentRunnerContent).toContain('empty_success_result: upstream returned success with no visible assistant content');
+    expect(agentRunnerContent).toContain("if (!finalResultText.trim() && !emittedVisibleOutput)");
+    expect(agentRunnerContent).toContain('模型返回了一个空的成功结果');
   });
 });

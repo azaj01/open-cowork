@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   resolveClaudeCodeExecutablePath: vi.fn(),
   ensureProxyReady: vi.fn(),
+  retainProxyLease: vi.fn(),
+  releaseProxyLease: vi.fn(),
 }));
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
@@ -18,11 +20,15 @@ vi.mock('../src/main/claude/claude-code-path', () => ({
 vi.mock('../src/main/proxy/claude-proxy-manager', () => ({
   claudeProxyManager: {
     ensureReady: mocks.ensureProxyReady,
+    retain: mocks.retainProxyLease,
+    release: mocks.releaseProxyLease,
   },
 }));
 
 vi.mock('../src/main/session/claude-unified-mode', () => ({
   isClaudeUnifiedModeEnabled: () => true,
+  shouldUseUnifiedClaudeSdk: () => true,
+  shouldUseUnifiedClaudeProxy: () => true,
 }));
 
 vi.mock('../src/main/auth/local-auth', () => ({
@@ -75,6 +81,8 @@ describe('claude-sdk-one-shot', () => {
     mocks.query.mockReset();
     mocks.resolveClaudeCodeExecutablePath.mockReset();
     mocks.ensureProxyReady.mockReset();
+    mocks.retainProxyLease.mockReset();
+    mocks.releaseProxyLease.mockReset();
     mocks.resolveClaudeCodeExecutablePath.mockReturnValue({
       executablePath: '/opt/homebrew/bin/claude',
       source: 'test.stub',
@@ -88,6 +96,7 @@ describe('claude-sdk-one-shot', () => {
       sdkApiKey: 'sk-ant-local-proxy',
       pid: 9999,
     });
+    mocks.releaseProxyLease.mockResolvedValue(undefined);
   });
 
   it('returns success for sdk probe when assistant responds without errors', async () => {
@@ -132,6 +141,8 @@ describe('claude-sdk-one-shot', () => {
     );
     const callArg = mocks.query.mock.calls[0]?.[0] as { options?: Record<string, unknown> } | undefined;
     expect(callArg?.options).not.toHaveProperty('settingSources');
+    expect(mocks.retainProxyLease).toHaveBeenCalledWith('test-signature');
+    expect(mocks.releaseProxyLease).toHaveBeenCalledWith('test-signature');
   });
 
   it('maps authentication_failed to unauthorized', async () => {
@@ -318,6 +329,43 @@ describe('claude-sdk-one-shot', () => {
     );
   });
 
+  it('preserves /v1 on custom gemini relay base url when probing through proxy', async () => {
+    mocks.query.mockReturnValue(
+      streamFrom([
+        {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'sdk_probe_ok' }] },
+        },
+        {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'sdk_probe_ok',
+        },
+      ])
+    );
+
+    const result = await probeWithClaudeSdk(
+      {
+        provider: 'custom',
+        customProtocol: 'gemini',
+        apiKey: 'AIza-test',
+        baseUrl: 'https://gemini-proxy.example/v1',
+        model: 'gemini/gemini-2.5-flash',
+      },
+      createBaseConfig()
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mocks.ensureProxyReady).toHaveBeenCalledWith(
+      expect.objectContaining({
+        upstreamKind: 'gemini',
+        upstreamBaseUrl: 'https://gemini-proxy.example/v1',
+        upstreamApiKey: 'AIza-test',
+      })
+    );
+  });
+
   it('normalizes title output from sdk response', async () => {
     mocks.query.mockReturnValue(
       streamFrom([
@@ -336,6 +384,26 @@ describe('claude-sdk-one-shot', () => {
 
     const title = await generateTitleWithClaudeSdk('Generate title', createBaseConfig());
     expect(title).toBe('My Session Title');
+  });
+
+  it('ignores synthetic empty assistant title text and falls back to final result text', async () => {
+    mocks.query.mockReturnValue(
+      streamFrom([
+        {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: '(no content)' }] },
+        },
+        {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'Recovered Title',
+        },
+      ])
+    );
+
+    const title = await generateTitleWithClaudeSdk('Generate title', createBaseConfig());
+    expect(title).toBe('Recovered Title');
   });
 
   it('generates title for custom/openai official openai base via proxy', async () => {

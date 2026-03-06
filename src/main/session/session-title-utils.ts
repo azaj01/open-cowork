@@ -27,6 +27,9 @@ export function normalizeGeneratedTitle(value: string | null | undefined): strin
   if (!firstLine) return null;
   const normalized = firstLine.replace(/^["'`]+|["'`]+$/g, '').trim();
   if (!normalized) return null;
+  if (normalized.toLowerCase() === '(no content)' || normalized.toLowerCase() === '(empty content)') {
+    return null;
+  }
   return normalized.slice(0, 120);
 }
 

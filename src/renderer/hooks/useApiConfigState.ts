@@ -80,6 +80,17 @@ export const FALLBACK_PROVIDER_PRESETS: ProviderPresets = {
     keyPlaceholder: 'sk-...',
     keyHint: 'Get from platform.openai.com',
   },
+  gemini: {
+    name: 'Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com',
+    models: [
+      { id: 'gemini/gemini-2.5-flash', name: 'gemini-2.5-flash' },
+      { id: 'gemini/gemini-2.5-pro', name: 'gemini-2.5-pro' },
+      { id: 'gemini/gemini-2.0-flash', name: 'gemini-2.0-flash' },
+    ],
+    keyPlaceholder: 'AIza...',
+    keyHint: 'Get from Google AI Studio or Gemini API',
+  },
   custom: {
     name: 'More Models',
     baseUrl: 'https://open.bigmodel.cn/api/anthropic',
@@ -93,18 +104,26 @@ export const FALLBACK_PROVIDER_PRESETS: ProviderPresets = {
   },
 };
 
-const PROFILE_KEYS: ProviderProfileKey[] = ['openrouter', 'anthropic', 'openai', 'custom:anthropic', 'custom:openai'];
+const PROFILE_KEYS: ProviderProfileKey[] = [
+  'openrouter',
+  'anthropic',
+  'openai',
+  'gemini',
+  'custom:anthropic',
+  'custom:openai',
+  'custom:gemini',
+];
 
 function isProfileKey(value: unknown): value is ProviderProfileKey {
   return typeof value === 'string' && PROFILE_KEYS.includes(value as ProviderProfileKey);
 }
 
 function isProviderType(value: unknown): value is ProviderType {
-  return value === 'openrouter' || value === 'anthropic' || value === 'custom' || value === 'openai';
+  return value === 'openrouter' || value === 'anthropic' || value === 'custom' || value === 'openai' || value === 'gemini';
 }
 
 function isCustomProtocol(value: unknown): value is CustomProtocolType {
-  return value === 'anthropic' || value === 'openai';
+  return value === 'anthropic' || value === 'openai' || value === 'gemini';
 }
 
 export function profileKeyFromProvider(
@@ -114,7 +133,13 @@ export function profileKeyFromProvider(
   if (provider !== 'custom') {
     return provider;
   }
-  return customProtocol === 'openai' ? 'custom:openai' : 'custom:anthropic';
+  if (customProtocol === 'openai') {
+    return 'custom:openai';
+  }
+  if (customProtocol === 'gemini') {
+    return 'custom:gemini';
+  }
+  return 'custom:anthropic';
 }
 
 export function profileKeyToProvider(profileKey: ProviderProfileKey): {
@@ -124,8 +149,17 @@ export function profileKeyToProvider(profileKey: ProviderProfileKey): {
   if (profileKey === 'custom:openai') {
     return { provider: 'custom', customProtocol: 'openai' };
   }
+  if (profileKey === 'custom:gemini') {
+    return { provider: 'custom', customProtocol: 'gemini' };
+  }
   if (profileKey === 'custom:anthropic') {
     return { provider: 'custom', customProtocol: 'anthropic' };
+  }
+  if (profileKey === 'openai') {
+    return { provider: 'openai', customProtocol: 'openai' };
+  }
+  if (profileKey === 'gemini') {
+    return { provider: 'gemini', customProtocol: 'gemini' };
   }
   return { provider: profileKey, customProtocol: 'anthropic' };
 }
@@ -134,9 +168,16 @@ export function isCustomAnthropicLoopbackGateway(baseUrl: string): boolean {
   return isLoopbackBaseUrl(baseUrl);
 }
 
+export function isCustomGeminiLoopbackGateway(baseUrl: string): boolean {
+  return isLoopbackBaseUrl(baseUrl);
+}
+
 function modelPresetForProfile(profileKey: ProviderProfileKey, presets: ProviderPresets) {
   if (profileKey === 'custom:openai') {
     return presets.openai;
+  }
+  if (profileKey === 'custom:gemini') {
+    return presets.gemini;
   }
   if (profileKey === 'custom:anthropic') {
     return presets.custom;
@@ -176,7 +217,11 @@ function normalizeProfile(
 
 export function buildApiConfigSnapshot(config: AppConfig | null | undefined, presets: ProviderPresets): ConfigStateSnapshot {
   const provider = config?.provider || 'openrouter';
-  const customProtocol: CustomProtocolType = config?.customProtocol === 'openai' ? 'openai' : 'anthropic';
+  const customProtocol: CustomProtocolType = config?.customProtocol === 'openai'
+    ? 'openai'
+    : config?.customProtocol === 'gemini'
+      ? 'gemini'
+      : 'anthropic';
   const derivedProfileKey = profileKeyFromProvider(provider, customProtocol);
   const activeProfileKey = isProfileKey(config?.activeProfileKey) ? config.activeProfileKey : derivedProfileKey;
 
@@ -322,7 +367,13 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
   const [pendingConfigSetAction, setPendingConfigSetAction] = useState<PendingConfigSetAction | null>(null);
   const [isMutatingConfigSet, setIsMutatingConfigSet] = useState(false);
 
-  const [lastCustomProtocol, setLastCustomProtocol] = useState<CustomProtocolType>('anthropic');
+  const [lastCustomProtocol, setLastCustomProtocol] = useState<CustomProtocolType>(() => (
+    initialConfig?.customProtocol === 'openai'
+      ? 'openai'
+      : initialConfig?.customProtocol === 'gemini'
+        ? 'gemini'
+        : 'anthropic'
+  ));
   const [enableThinking, setEnableThinking] = useState(Boolean(initialConfig?.enableThinking));
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
   const [savedDraftSignature, setSavedDraftSignature] = useState('');
@@ -339,8 +390,8 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
   const provider = providerMeta.provider;
   const customProtocol = providerMeta.customProtocol;
   const currentProfile = profiles[activeProfileKey] || defaultProfileForKey(activeProfileKey, presets);
-  const currentPreset = provider === 'custom' ? presets.custom : presets[provider];
   const modelPreset = modelPresetForProfile(activeProfileKey, presets);
+  const currentPreset = modelPreset;
   const modelOptions = modelPreset.models;
 
   const currentConfigSet = useMemo(
@@ -362,9 +413,10 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
   const openaiMode = currentProfile.openaiMode;
 
   const isOpenAIMode = provider === 'openai' || (provider === 'custom' && customProtocol === 'openai');
-  const allowEmptyApiKey = provider === 'custom'
-    && customProtocol === 'anthropic'
-    && isCustomAnthropicLoopbackGateway(baseUrl);
+  const allowEmptyApiKey = provider === 'custom' && (
+    (customProtocol === 'anthropic' && isCustomAnthropicLoopbackGateway(baseUrl))
+    || (customProtocol === 'gemini' && isCustomGeminiLoopbackGateway(baseUrl))
+  );
   const requiresApiKey = !isOpenAIMode && !allowEmptyApiKey;
   const showsCompatibilityProbeHint = provider === 'openrouter' || (provider === 'custom' && customProtocol === 'anthropic');
 
@@ -394,7 +446,13 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
     if (activeMeta.provider === 'custom') {
       setLastCustomProtocol(activeMeta.customProtocol);
     } else {
-      setLastCustomProtocol(config?.customProtocol === 'openai' ? 'openai' : 'anthropic');
+      setLastCustomProtocol(
+        config?.customProtocol === 'openai'
+          ? 'openai'
+          : config?.customProtocol === 'gemini'
+            ? 'gemini'
+            : 'anthropic'
+      );
     }
 
     setSavedDraftSignature(buildApiConfigDraftSignature(snapshot.activeProfileKey, snapshot.profiles, snapshot.enableThinking));

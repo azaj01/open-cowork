@@ -35,7 +35,7 @@ import {
   normalizeGeneratedTitle,
 } from './session-title-utils';
 import { generateTitleWithClaudeSdk } from '../claude/claude-sdk-one-shot';
-import { getClaudeUnifiedModeState, isClaudeUnifiedModeEnabled } from './claude-unified-mode';
+import { getClaudeUnifiedModeState, shouldUseUnifiedClaudeProxy, shouldUseUnifiedClaudeSdk } from './claude-unified-mode';
 import { buildScheduledTaskTitle } from '../../shared/schedule/task-title';
 
 interface AgentRunner {
@@ -104,12 +104,13 @@ export class SessionManager {
    * Can be called to recreate runner when config changes
    */
   private createAgentRunner(): void {
-    const provider = configStore.get('provider');
-    const customProtocol = configStore.get('customProtocol');
+    const config = configStore.getAll();
+    const provider = config.provider;
+    const customProtocol = config.customProtocol;
     const useOpenAI = provider === 'openai' || (provider === 'custom' && customProtocol === 'openai');
     const unifiedMode = getClaudeUnifiedModeState();
     this.openaiBackendRoute = null;
-    if (unifiedMode.enabled) {
+    if (shouldUseUnifiedClaudeSdk(config)) {
       this.openaiBackendRoute = null;
       this.agentRunner = this.createClaudeAgentRunner();
       log('[SessionManager] Using Claude Agent runner (unified mode)', {
@@ -765,7 +766,7 @@ export class SessionManager {
   }
 
   private async generateTitleWithConfig(titlePrompt: string, cwd?: string): Promise<string | null> {
-    if (isClaudeUnifiedModeEnabled()) {
+    if (shouldUseUnifiedClaudeSdk(configStore.getAll())) {
       return normalizeGeneratedTitle(await generateTitleWithClaudeSdk(titlePrompt, configStore.getAll(), cwd));
     }
 

@@ -90,6 +90,35 @@ describe('runConfigApiTest', () => {
     expect(mocks.probeWithClaudeSdk).not.toHaveBeenCalled();
   });
 
+  it('keeps gemini config.test on Claude SDK probe even when unified mode flag is disabled', async () => {
+    const expected: ApiTestResult = { ok: true, latencyMs: 18 };
+    mocks.probeWithClaudeSdk.mockResolvedValue(expected);
+
+    const result = await runConfigApiTest(
+      {
+        provider: 'gemini',
+        customProtocol: 'gemini',
+        apiKey: 'AIza-test',
+        baseUrl: 'https://generativelanguage.googleapis.com',
+        model: 'gemini/gemini-2.5-flash',
+      },
+      {
+        ...createConfig(),
+        provider: 'gemini',
+        customProtocol: 'gemini',
+        activeProfileKey: 'gemini',
+        apiKey: 'AIza-test',
+        baseUrl: 'https://generativelanguage.googleapis.com',
+        model: 'gemini/gemini-2.5-flash',
+      },
+      false
+    );
+
+    expect(result).toEqual(expected);
+    expect(mocks.probeWithClaudeSdk).toHaveBeenCalledTimes(1);
+    expect(mocks.testApiConnection).not.toHaveBeenCalled();
+  });
+
   it('does not fall back to legacy tester when unified probe cannot find Claude executable', async () => {
     const probeFailure: ApiTestResult = {
       ok: false,

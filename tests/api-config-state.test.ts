@@ -4,6 +4,7 @@ import {
   FALLBACK_PROVIDER_PRESETS,
   buildApiConfigSnapshot,
   isCustomAnthropicLoopbackGateway,
+  isCustomGeminiLoopbackGateway,
   profileKeyFromProvider,
   profileKeyToProvider,
 } from '../src/renderer/hooks/useApiConfigState';
@@ -12,9 +13,14 @@ describe('api config state helpers', () => {
   it('maps provider/protocol to profile key and back', () => {
     expect(profileKeyFromProvider('openrouter')).toBe('openrouter');
     expect(profileKeyFromProvider('custom', 'openai')).toBe('custom:openai');
+    expect(profileKeyFromProvider('custom', 'gemini')).toBe('custom:gemini');
     expect(profileKeyToProvider('custom:anthropic')).toEqual({
       provider: 'custom',
       customProtocol: 'anthropic',
+    });
+    expect(profileKeyToProvider('gemini')).toEqual({
+      provider: 'gemini',
+      customProtocol: 'gemini',
     });
   });
 
@@ -83,5 +89,45 @@ describe('api config state helpers', () => {
     expect(isCustomAnthropicLoopbackGateway('http://[::1]:8082')).toBe(true);
     expect(isCustomAnthropicLoopbackGateway('http://0.0.0.0:8082')).toBe(true);
     expect(isCustomAnthropicLoopbackGateway('https://proxy.example.com')).toBe(false);
+  });
+
+  it('detects local custom gemini loopback gateway url', () => {
+    expect(isCustomGeminiLoopbackGateway('http://127.0.0.1:8082')).toBe(true);
+    expect(isCustomGeminiLoopbackGateway('http://localhost:8082')).toBe(true);
+    expect(isCustomGeminiLoopbackGateway('http://[::1]:8082')).toBe(true);
+    expect(isCustomGeminiLoopbackGateway('http://0.0.0.0:8082')).toBe(true);
+    expect(isCustomGeminiLoopbackGateway('https://proxy.example.com')).toBe(false);
+  });
+
+  it('loads gemini provider and custom gemini profile values without fallback drift', () => {
+    const config = {
+      provider: 'custom',
+      customProtocol: 'gemini',
+      activeProfileKey: 'custom:gemini',
+      apiKey: 'AIza-relay',
+      baseUrl: 'https://gemini-proxy.example/v1',
+      model: 'gemini/gemini-2.5-pro',
+      openaiMode: 'responses',
+      profiles: {
+        gemini: {
+          apiKey: 'AIza-official',
+          baseUrl: 'https://generativelanguage.googleapis.com',
+          model: 'gemini/gemini-2.5-flash',
+          openaiMode: 'responses',
+        },
+        'custom:gemini': {
+          apiKey: 'AIza-relay',
+          baseUrl: 'https://gemini-proxy.example/v1',
+          model: 'gemini/gemini-2.5-pro',
+          openaiMode: 'responses',
+        },
+      },
+      isConfigured: true,
+    } as AppConfig;
+
+    const snapshot = buildApiConfigSnapshot(config, FALLBACK_PROVIDER_PRESETS);
+    expect(snapshot.activeProfileKey).toBe('custom:gemini');
+    expect(snapshot.profiles.gemini.apiKey).toBe('AIza-official');
+    expect(snapshot.profiles['custom:gemini'].baseUrl).toBe('https://gemini-proxy.example/v1');
   });
 });

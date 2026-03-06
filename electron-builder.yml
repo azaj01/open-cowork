@@ -106,6 +106,10 @@ linux:
       to: node
       filter:
         - "**/*"
+    - from: resources/python/linux-${arch}
+      to: python
+      filter:
+        - "**/*"
 
 nsis:
   oneClick: false

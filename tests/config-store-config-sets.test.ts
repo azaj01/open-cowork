@@ -155,4 +155,26 @@ describe('ConfigStore config sets', () => {
     expect(renamed.configSets[0].name).toBe('Main Profile');
     expect(() => store.deleteSet({ id: 'default' })).toThrowError();
   });
+
+  it('creates blank set from gemini provider with gemini defaults intact', () => {
+    mocks.seed = {
+      provider: 'gemini',
+      customProtocol: 'gemini',
+      apiKey: 'AIza-existing',
+      baseUrl: 'https://generativelanguage.googleapis.com',
+      model: 'gemini/gemini-2.5-pro',
+      openaiMode: 'responses',
+      enableThinking: false,
+      isConfigured: true,
+    };
+
+    const store = new ConfigStore();
+    const created = store.createSet({ name: 'Gemini Blank', mode: 'blank' });
+    const blankSet = created.configSets.find((set) => set.id !== 'default');
+
+    expect(blankSet?.provider).toBe('gemini');
+    expect(blankSet?.profiles.gemini?.apiKey).toBe('');
+    expect(blankSet?.profiles.gemini?.baseUrl).toBe('https://generativelanguage.googleapis.com');
+    expect(blankSet?.profiles.gemini?.model).toBe('gemini/gemini-2.5-flash');
+  });
 });

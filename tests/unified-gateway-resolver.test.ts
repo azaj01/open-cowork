@@ -115,6 +115,71 @@ describe('resolveUnifiedGatewayProfile', () => {
     });
   });
 
+  it('routes official gemini provider to gemini upstream with default base url', () => {
+    const decision = resolveUnifiedGatewayProfile(
+      createConfig({
+        provider: 'gemini',
+        customProtocol: 'gemini',
+        activeProfileKey: 'gemini',
+        apiKey: 'AIza-test',
+        baseUrl: 'https://generativelanguage.googleapis.com/',
+        model: 'google/gemini-2.5-flash',
+      })
+    );
+
+    expect(decision.ok).toBe(true);
+    expect(decision.profile).toMatchObject({
+      upstreamKind: 'gemini',
+      upstreamBaseUrl: 'https://generativelanguage.googleapis.com',
+      upstreamApiKey: 'AIza-test',
+      model: 'gemini/gemini-2.5-flash',
+      customProtocol: 'gemini',
+      requiresProxy: true,
+    });
+  });
+
+  it('routes custom gemini protocol through gemini upstream with explicit base url', () => {
+    const decision = resolveUnifiedGatewayProfile(
+      createConfig({
+        provider: 'custom',
+        customProtocol: 'gemini',
+        activeProfileKey: 'custom:gemini',
+        apiKey: 'AIza-relay',
+        baseUrl: 'https://gemini-proxy.example/v1/',
+        model: 'gemini-2.5-pro',
+      })
+    );
+
+    expect(decision.ok).toBe(true);
+    expect(decision.profile).toMatchObject({
+      upstreamKind: 'gemini',
+      upstreamBaseUrl: 'https://gemini-proxy.example/v1',
+      upstreamApiKey: 'AIza-relay',
+      model: 'gemini/gemini-2.5-pro',
+    });
+  });
+
+  it('allows empty key for custom/gemini loopback gateways', () => {
+    const decision = resolveUnifiedGatewayProfile(
+      createConfig({
+        provider: 'custom',
+        customProtocol: 'gemini',
+        activeProfileKey: 'custom:gemini',
+        apiKey: '',
+        baseUrl: 'http://127.0.0.1:8082',
+        model: 'gemini/gemini-2.5-flash',
+      })
+    );
+
+    expect(decision.ok).toBe(true);
+    expect(decision.profile).toMatchObject({
+      upstreamKind: 'gemini',
+      upstreamBaseUrl: 'http://127.0.0.1:8082',
+      upstreamApiKey: '',
+      model: 'gemini/gemini-2.5-flash',
+    });
+  });
+
   it('does not drift openrouter to local codex oauth when key is missing', () => {
     mocks.importLocalAuthToken.mockReturnValue({
       provider: 'codex',
@@ -154,8 +219,15 @@ describe('resolveUnifiedGatewayProfile', () => {
     expect(openaiDecision.ok).toBe(true);
     expect(openaiDecision.profile).toMatchObject({
       upstreamKind: 'openai',
+      customProtocol: 'openai',
       upstreamBaseUrl: 'https://chatgpt.com/backend-api/codex',
       upstreamApiKey: 'oauth-local-token',
+      upstreamHeaders: {
+        'User-Agent': 'CodexBar',
+        'ChatGPT-Account-Id': 'acct_123456',
+      },
+      openaiAccountId: 'acct_123456',
+      useCodexOAuth: true,
     });
 
     const customDecision = resolveUnifiedGatewayProfile(
@@ -214,6 +286,22 @@ describe('resolveUnifiedGatewayProfile', () => {
         provider: 'custom',
         customProtocol: 'anthropic',
         apiKey: 'sk-test',
+        baseUrl: '',
+      })
+    );
+    expect(decision).toEqual({
+      ok: false,
+      reason: 'missing_base_url',
+    });
+  });
+
+  it('returns missing_base_url for custom gemini provider without baseUrl', () => {
+    const decision = resolveUnifiedGatewayProfile(
+      createConfig({
+        provider: 'custom',
+        customProtocol: 'gemini',
+        activeProfileKey: 'custom:gemini',
+        apiKey: 'AIza-test',
         baseUrl: '',
       })
     );

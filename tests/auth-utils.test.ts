@@ -18,6 +18,7 @@ import {
   resolveOpenAICredentials,
   sanitizeOpenAIAccountId,
   shouldAllowEmptyAnthropicApiKey,
+  shouldAllowEmptyGeminiApiKey,
   shouldUseAnthropicAuthToken,
 } from '../src/main/config/auth-utils';
 
@@ -188,6 +189,32 @@ describe('auth-utils', () => {
       shouldAllowEmptyAnthropicApiKey({
         provider: 'anthropic',
         customProtocol: 'anthropic',
+        baseUrl: 'http://127.0.0.1:8082',
+      })
+    ).toBe(false);
+  });
+
+  it('allows empty gemini api key only for custom gemini loopback gateway', () => {
+    expect(
+      shouldAllowEmptyGeminiApiKey({
+        provider: 'custom',
+        customProtocol: 'gemini',
+        baseUrl: 'http://127.0.0.1:8082',
+      })
+    ).toBe(true);
+
+    expect(
+      shouldAllowEmptyGeminiApiKey({
+        provider: 'custom',
+        customProtocol: 'gemini',
+        baseUrl: 'https://proxy.example.com',
+      })
+    ).toBe(false);
+
+    expect(
+      shouldAllowEmptyGeminiApiKey({
+        provider: 'gemini',
+        customProtocol: 'gemini',
         baseUrl: 'http://127.0.0.1:8082',
       })
     ).toBe(false);

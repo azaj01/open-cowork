@@ -29,7 +29,7 @@ import {
   type ScheduledTaskUpdateInput,
 } from './schedule/scheduled-task-manager';
 import { createScheduledTaskStore } from './schedule/scheduled-task-store';
-import { getClaudeUnifiedModeState, isClaudeUnifiedModeEnabled } from './session/claude-unified-mode';
+import { getClaudeUnifiedModeState, shouldUseUnifiedClaudeProxy, shouldUseUnifiedClaudeSdk } from './session/claude-unified-mode';
 import { claudeProxyManager } from './proxy/claude-proxy-manager';
 import {
   buildScheduledTaskFallbackTitle,
@@ -579,13 +579,14 @@ app.whenReady().then(async () => {
 
   // Initialize session manager
   sessionManager = new SessionManager(db, sendToRenderer, pluginRuntimeService);
-  if (isClaudeUnifiedModeEnabled() && process.env.COWORK_DISABLE_CLAUDE_PROXY !== '1') {
-    try {
-      await claudeProxyManager.warmupForConfig(configStore.getAll());
-      log('[ClaudeProxy] Warmup complete during app startup');
-    } catch (error) {
-      logWarn('[ClaudeProxy] Startup warmup failed; it will retry on demand', error);
-    }
+  if (shouldUseUnifiedClaudeProxy(configStore.getAll())) {
+    void claudeProxyManager.warmupForConfig(configStore.getAll())
+      .then(() => {
+        log('[ClaudeProxy] Warmup complete during app startup');
+      })
+      .catch((error) => {
+        logWarn('[ClaudeProxy] Startup warmup failed; it will retry on demand', error);
+      });
   }
 
   const scheduledTaskStore = createScheduledTaskStore(db);
@@ -944,12 +945,10 @@ const syncConfigAfterMutation = async () => {
     log('[Config] Session manager config reloaded');
   }
 
-  if (isClaudeUnifiedModeEnabled() && process.env.COWORK_DISABLE_CLAUDE_PROXY !== '1') {
-    try {
-      await claudeProxyManager.warmupForConfig(configStore.getAll());
-    } catch (error) {
+  if (shouldUseUnifiedClaudeProxy(configStore.getAll())) {
+    void claudeProxyManager.warmupForConfig(configStore.getAll()).catch((error) => {
       logWarn('[ClaudeProxy] Warmup after config mutation failed', error);
-    }
+    });
   }
 
   // Notify renderer of config update
@@ -1010,7 +1009,7 @@ ipcMain.handle('config.isConfigured', () => {
 
 ipcMain.handle('config.test', async (_event, payload: ApiTestInput): Promise<ApiTestResult> => {
   try {
-    return await runConfigApiTest(payload, configStore.getAll(), isClaudeUnifiedModeEnabled());
+    return await runConfigApiTest(payload, configStore.getAll(), shouldUseUnifiedClaudeSdk(payload));
   } catch (error) {
     logError('[Config] API test failed:', error);
     return {

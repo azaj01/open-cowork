@@ -151,6 +151,36 @@ describe('ConfigStore provider profiles', () => {
     expect(openrouterView.model).toBe('anthropic/claude-sonnet-4');
   });
 
+  it('keeps gemini and custom gemini profiles isolated from other providers', () => {
+    const store = new ConfigStore();
+
+    store.update({
+      provider: 'gemini',
+      apiKey: 'AIza-official',
+      baseUrl: 'https://generativelanguage.googleapis.com',
+      model: 'gemini/gemini-2.5-flash',
+    });
+    store.update({
+      provider: 'custom',
+      customProtocol: 'gemini',
+      apiKey: 'AIza-relay',
+      baseUrl: 'https://gemini-proxy.example/v1',
+      model: 'gemini/gemini-2.5-pro',
+    });
+
+    const customGeminiView = store.getAll();
+    expect(customGeminiView.provider).toBe('custom');
+    expect(customGeminiView.customProtocol).toBe('gemini');
+    expect(customGeminiView.apiKey).toBe('AIza-relay');
+    expect(customGeminiView.profiles.gemini?.apiKey).toBe('AIza-official');
+
+    store.update({ provider: 'gemini' });
+    const geminiView = store.getAll();
+    expect(geminiView.provider).toBe('gemini');
+    expect(geminiView.apiKey).toBe('AIza-official');
+    expect(geminiView.model).toBe('gemini/gemini-2.5-flash');
+  });
+
   it('treats global configured state as any set usable while active set can still be unusable', () => {
     const store = new ConfigStore();
 
@@ -187,6 +217,22 @@ describe('ConfigStore provider profiles', () => {
       apiKey: '',
       baseUrl: 'http://[::1]:8082',
       model: 'openai/gpt-4.1-mini',
+    });
+
+    expect(store.hasUsableCredentialsForActiveSet()).toBe(true);
+    expect(store.hasAnyUsableCredentials()).toBe(true);
+    expect(store.isConfigured()).toBe(true);
+  });
+
+  it('treats loopback custom gemini gateway as usable without api key', () => {
+    const store = new ConfigStore();
+
+    store.update({
+      provider: 'custom',
+      customProtocol: 'gemini',
+      apiKey: '',
+      baseUrl: 'http://127.0.0.1:8082',
+      model: 'gemini/gemini-2.5-flash',
     });
 
     expect(store.hasUsableCredentialsForActiveSet()).toBe(true);

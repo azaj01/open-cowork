@@ -7,15 +7,23 @@ import {
   normalizeAnthropicBaseUrl,
   resolveOpenAICredentials,
   shouldAllowEmptyAnthropicApiKey,
+  shouldAllowEmptyGeminiApiKey,
   shouldUseAnthropicAuthToken,
 } from './auth-utils';
 
 /**
  * Application configuration schema
  */
-export type ProviderType = 'openrouter' | 'anthropic' | 'custom' | 'openai';
-export type CustomProtocolType = 'anthropic' | 'openai';
-export type ProviderProfileKey = 'openrouter' | 'anthropic' | 'openai' | 'custom:anthropic' | 'custom:openai';
+export type ProviderType = 'openrouter' | 'anthropic' | 'custom' | 'openai' | 'gemini';
+export type CustomProtocolType = 'anthropic' | 'openai' | 'gemini';
+export type ProviderProfileKey =
+  | 'openrouter'
+  | 'anthropic'
+  | 'openai'
+  | 'gemini'
+  | 'custom:anthropic'
+  | 'custom:openai'
+  | 'custom:gemini';
 export type ConfigSetId = string;
 export type CreateSetMode = 'blank' | 'clone';
 
@@ -112,6 +120,12 @@ const defaultProfiles: Record<ProviderProfileKey, ProviderProfile> = {
     model: 'gpt-5.2',
     openaiMode: 'responses',
   },
+  gemini: {
+    apiKey: '',
+    baseUrl: 'https://generativelanguage.googleapis.com',
+    model: 'gemini/gemini-2.5-flash',
+    openaiMode: 'responses',
+  },
   'custom:anthropic': {
     apiKey: '',
     baseUrl: 'https://open.bigmodel.cn/api/anthropic',
@@ -122,6 +136,12 @@ const defaultProfiles: Record<ProviderProfileKey, ProviderProfile> = {
     apiKey: '',
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-5.2',
+    openaiMode: 'responses',
+  },
+  'custom:gemini': {
+    apiKey: '',
+    baseUrl: 'https://generativelanguage.googleapis.com',
+    model: 'gemini/gemini-2.5-flash',
     openaiMode: 'responses',
   },
 };
@@ -194,6 +214,17 @@ export const PROVIDER_PRESETS = {
     keyPlaceholder: 'sk-...',
     keyHint: '从 platform.openai.com 获取',
   },
+  gemini: {
+    name: 'Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com',
+    models: [
+      { id: 'gemini/gemini-2.5-flash', name: 'gemini-2.5-flash' },
+      { id: 'gemini/gemini-2.5-pro', name: 'gemini-2.5-pro' },
+      { id: 'gemini/gemini-2.0-flash', name: 'gemini-2.0-flash' },
+    ],
+    keyPlaceholder: 'AIza...',
+    keyHint: '从 Google AI Studio 或 Gemini API 获取',
+  },
   custom: {
     name: '更多模型',
     baseUrl: 'https://open.bigmodel.cn/api/anthropic',
@@ -207,14 +238,22 @@ export const PROVIDER_PRESETS = {
   },
 };
 
-const PROFILE_KEYS: ProviderProfileKey[] = ['openrouter', 'anthropic', 'openai', 'custom:anthropic', 'custom:openai'];
+const PROFILE_KEYS: ProviderProfileKey[] = [
+  'openrouter',
+  'anthropic',
+  'openai',
+  'gemini',
+  'custom:anthropic',
+  'custom:openai',
+  'custom:gemini',
+];
 
 function isProviderType(value: unknown): value is ProviderType {
-  return value === 'openrouter' || value === 'anthropic' || value === 'custom' || value === 'openai';
+  return value === 'openrouter' || value === 'anthropic' || value === 'custom' || value === 'openai' || value === 'gemini';
 }
 
 function isCustomProtocol(value: unknown): value is CustomProtocolType {
-  return value === 'anthropic' || value === 'openai';
+  return value === 'anthropic' || value === 'openai' || value === 'gemini';
 }
 
 function isProfileKey(value: unknown): value is ProviderProfileKey {
@@ -225,15 +264,30 @@ function profileKeyFromProvider(provider: ProviderType, customProtocol: CustomPr
   if (provider !== 'custom') {
     return provider;
   }
-  return customProtocol === 'openai' ? 'custom:openai' : 'custom:anthropic';
+  if (customProtocol === 'openai') {
+    return 'custom:openai';
+  }
+  if (customProtocol === 'gemini') {
+    return 'custom:gemini';
+  }
+  return 'custom:anthropic';
 }
 
 function profileKeyToProvider(profileKey: ProviderProfileKey): { provider: ProviderType; customProtocol: CustomProtocolType } {
   if (profileKey === 'custom:openai') {
     return { provider: 'custom', customProtocol: 'openai' };
   }
+  if (profileKey === 'custom:gemini') {
+    return { provider: 'custom', customProtocol: 'gemini' };
+  }
   if (profileKey === 'custom:anthropic') {
     return { provider: 'custom', customProtocol: 'anthropic' };
+  }
+  if (profileKey === 'openai') {
+    return { provider: 'openai', customProtocol: 'openai' };
+  }
+  if (profileKey === 'gemini') {
+    return { provider: 'gemini', customProtocol: 'gemini' };
   }
   return { provider: profileKey, customProtocol: 'anthropic' };
 }
@@ -252,6 +306,13 @@ function toNonEmptyString(value: unknown): string | null {
 
 function nowISO(): string {
   return new Date().toISOString();
+}
+
+function normalizeCustomProtocol(value: CustomProtocolType | undefined, fallback: CustomProtocolType = 'anthropic'): CustomProtocolType {
+  if (value === 'openai' || value === 'gemini') {
+    return value;
+  }
+  return fallback;
 }
 
 export class ConfigStore {
@@ -779,7 +840,7 @@ export class ConfigStore {
     if (mode === 'blank') {
       const activeSet = current.configSets.find((set) => set.id === current.activeConfigSetId) || current.configSets[0];
       const seedProvider = activeSet?.provider || current.provider;
-      const seedProtocol: CustomProtocolType = activeSet?.customProtocol === 'openai' ? 'openai' : 'anthropic';
+      const seedProtocol: CustomProtocolType = normalizeCustomProtocol(activeSet?.customProtocol, 'anthropic');
       newSet = this.buildBlankConfigSet({
         id,
         name,
@@ -884,7 +945,7 @@ export class ConfigStore {
     if (Array.isArray(updates.configSets) && updates.configSets.length > 0) {
       const normalizedSets = this.normalizeConfigSets(updates.configSets, {
         provider: current.provider,
-        customProtocol: current.customProtocol === 'openai' ? 'openai' : 'anthropic',
+        customProtocol: normalizeCustomProtocol(current.customProtocol, 'anthropic'),
         activeProfileKey: current.activeProfileKey,
         profiles: this.cloneProfiles(current.profiles),
         enableThinking: current.enableThinking,
@@ -905,7 +966,7 @@ export class ConfigStore {
     const nextProfiles = this.cloneProfiles(targetSet.profiles);
     let nextActiveProfileKey = targetSet.activeProfileKey;
     let nextProvider = targetSet.provider;
-    let nextCustomProtocol: CustomProtocolType = targetSet.customProtocol === 'openai' ? 'openai' : 'anthropic';
+    let nextCustomProtocol: CustomProtocolType = normalizeCustomProtocol(targetSet.customProtocol, 'anthropic');
 
     const mutatesActiveSet =
       updates.profiles !== undefined ||
@@ -1015,7 +1076,14 @@ export class ConfigStore {
     })) {
       return true;
     }
-    const protocol: CustomProtocolType = projection.customProtocol === 'openai' ? 'openai' : 'anthropic';
+    if (shouldAllowEmptyGeminiApiKey({
+      provider: projection.provider,
+      customProtocol: projection.customProtocol,
+      baseUrl: projection.baseUrl,
+    })) {
+      return true;
+    }
+    const protocol: CustomProtocolType = normalizeCustomProtocol(projection.customProtocol, 'anthropic');
     if (!isOpenAIProvider({ provider: projection.provider, customProtocol: protocol })) {
       return false;
     }
@@ -1092,12 +1160,17 @@ export class ConfigStore {
     delete process.env.OPENAI_API_MODE;
     delete process.env.OPENAI_ACCOUNT_ID;
     delete process.env.OPENAI_CODEX_OAUTH;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_BASE_URL;
     delete process.env.CLAUDE_CODE_PATH;
     delete process.env.COWORK_WORKDIR;
 
     const useOpenAI =
       projectedConfig.provider === 'openai' ||
       (projectedConfig.provider === 'custom' && projectedConfig.customProtocol === 'openai');
+    const useGemini =
+      projectedConfig.provider === 'gemini' ||
+      (projectedConfig.provider === 'custom' && projectedConfig.customProtocol === 'gemini');
 
     if (useOpenAI) {
       const resolvedOpenAI = resolveOpenAICredentials(projectedConfig);
@@ -1116,6 +1189,18 @@ export class ConfigStore {
         process.env.OPENAI_MODEL = projectedConfig.model;
       }
       process.env.OPENAI_API_MODE = projectedConfig.openaiMode === 'chat' ? 'chat' : 'responses';
+    } else if (useGemini) {
+      const trimmedApiKey = projectedConfig.apiKey?.trim();
+      if (trimmedApiKey) {
+        process.env.GEMINI_API_KEY = trimmedApiKey;
+      }
+      const normalizedGeminiBaseUrl = projectedConfig.baseUrl?.trim().replace(/\/+$/, '');
+      if (normalizedGeminiBaseUrl) {
+        process.env.GEMINI_BASE_URL = normalizedGeminiBaseUrl;
+      }
+      if (projectedConfig.model) {
+        process.env.CLAUDE_MODEL = projectedConfig.model;
+      }
     } else {
       const effectiveAnthropicApiKey = projectedConfig.apiKey?.trim() || (
         shouldAllowEmptyAnthropicApiKey(projectedConfig)
@@ -1187,6 +1272,8 @@ export class ConfigStore {
       OPENAI_API_MODE: process.env.OPENAI_API_MODE || '(default)',
       OPENAI_ACCOUNT_ID: process.env.OPENAI_ACCOUNT_ID || '(not set)',
       OPENAI_CODEX_OAUTH: process.env.OPENAI_CODEX_OAUTH || '(not set)',
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY ? '✓ Set' : '(empty/unset)',
+      GEMINI_BASE_URL: process.env.GEMINI_BASE_URL || '(default)',
     });
   }
 

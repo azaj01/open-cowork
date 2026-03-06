@@ -45,6 +45,8 @@ describe('ConfigStore applyToEnv', () => {
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
     OPENAI_API_MODE: process.env.OPENAI_API_MODE,
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+    GEMINI_BASE_URL: process.env.GEMINI_BASE_URL,
   };
 
   beforeEach(() => {
@@ -53,6 +55,8 @@ describe('ConfigStore applyToEnv', () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_BASE_URL;
     delete process.env.OPENAI_API_MODE;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_BASE_URL;
   });
 
   afterEach(() => {
@@ -80,6 +84,16 @@ describe('ConfigStore applyToEnv', () => {
       delete process.env.OPENAI_API_MODE;
     } else {
       process.env.OPENAI_API_MODE = originalEnv.OPENAI_API_MODE;
+    }
+    if (originalEnv.GEMINI_API_KEY === undefined) {
+      delete process.env.GEMINI_API_KEY;
+    } else {
+      process.env.GEMINI_API_KEY = originalEnv.GEMINI_API_KEY;
+    }
+    if (originalEnv.GEMINI_BASE_URL === undefined) {
+      delete process.env.GEMINI_BASE_URL;
+    } else {
+      process.env.GEMINI_BASE_URL = originalEnv.GEMINI_BASE_URL;
     }
   });
 
@@ -188,5 +202,22 @@ describe('ConfigStore applyToEnv', () => {
     store.applyToEnv();
 
     expect(process.env.ANTHROPIC_BASE_URL).toBe('https://api.duckcoding.ai');
+  });
+
+  it('exports gemini credentials without leaking anthropic auth env', () => {
+    const store = new ConfigStore();
+
+    store.update({
+      provider: 'gemini',
+      customProtocol: 'gemini',
+      apiKey: 'AIza-test',
+      baseUrl: 'https://generativelanguage.googleapis.com/',
+      model: 'gemini/gemini-2.5-flash',
+    });
+    store.applyToEnv();
+
+    expect(process.env.GEMINI_API_KEY).toBe('AIza-test');
+    expect(process.env.GEMINI_BASE_URL).toBe('https://generativelanguage.googleapis.com');
+    expect(process.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
   });
 });

@@ -15,8 +15,9 @@ import { resolveClaudeCodeExecutablePath } from './claude-code-path';
 import { normalizeGeneratedTitle } from '../session/session-title-utils';
 import { resolveUnifiedGatewayProfile } from './unified-gateway-resolver';
 import { claudeProxyManager } from '../proxy/claude-proxy-manager';
-import { isClaudeUnifiedModeEnabled } from '../session/claude-unified-mode';
+import { shouldUseUnifiedClaudeProxy } from '../session/claude-unified-mode';
 import { isNodeExecutable, withBunHashShimEnv, withBunHashShimNodeArgs } from './bun-shim';
+import { isSyntheticAssistantTextBlock } from './assistant-text-filter';
 
 const NETWORK_ERROR_RE = /enotfound|econnrefused|etimedout|eai_again|enetunreach|timed?\s*out|timeout|abort|network\s*error/i;
 const AUTH_ERROR_RE = /authentication[_\s-]?failed|unauthorized|invalid[_\s-]?api[_\s-]?key|forbidden|401|403/i;
@@ -113,10 +114,16 @@ function resolveProbeBaseUrl(input: ApiTestInput): string | undefined {
 
 function resolveCustomProtocol(provider: AppConfig['provider'], customProtocol?: CustomProtocolType): CustomProtocolType {
   if (provider === 'custom') {
-    return customProtocol === 'openai' ? 'openai' : 'anthropic';
+    if (customProtocol === 'openai' || customProtocol === 'gemini') {
+      return customProtocol;
+    }
+    return 'anthropic';
   }
   if (provider === 'openai') {
     return 'openai';
+  }
+  if (provider === 'gemini') {
+    return 'gemini';
   }
   return 'anthropic';
 }
@@ -127,7 +134,7 @@ function buildProbeConfig(input: ApiTestInput, config: AppConfig): AppConfig {
   const effectiveApiKey = normalizedInputApiKey || config.apiKey?.trim() || '';
   const resolvedCustomProtocol = resolveCustomProtocol(input.provider, input.customProtocol);
   const effectiveRawBaseUrl = input.provider === 'custom' ? resolvedBaseUrl || '' : resolvedBaseUrl || config.baseUrl;
-  const effectiveBaseUrl = resolvedCustomProtocol === 'openai'
+  const effectiveBaseUrl = resolvedCustomProtocol === 'openai' || resolvedCustomProtocol === 'gemini'
     ? effectiveRawBaseUrl
     : normalizeAnthropicBaseUrl(effectiveRawBaseUrl);
   return {
@@ -156,6 +163,9 @@ function extractAssistantText(message: SDKMessage): string {
     }
     const typedBlock = block as { type?: string; text?: string };
     if ((typedBlock.type === 'text' || typedBlock.type === 'output_text') && typeof typedBlock.text === 'string') {
+      if (isSyntheticAssistantTextBlock(typedBlock.text)) {
+        continue;
+      }
       parts.push(typedBlock.text);
     }
   }
@@ -293,7 +303,8 @@ async function runClaudeOneShot(
 ): Promise<ClaudeOneShotResult> {
   let effectiveConfig = config;
   let overrides = getClaudeEnvOverrides(effectiveConfig);
-  if (isClaudeUnifiedModeEnabled() && process.env.COWORK_DISABLE_CLAUDE_PROXY !== '1') {
+  let proxyLeaseSignature: string | null = null;
+  if (shouldUseUnifiedClaudeProxy(config)) {
     const route = resolveUnifiedGatewayProfile(config);
     if (!route.ok || !route.profile) {
       return {
@@ -305,6 +316,8 @@ async function runClaudeOneShot(
 
     try {
       const runtime = await claudeProxyManager.ensureReady(route.profile);
+      claudeProxyManager.retain(runtime.signature);
+      proxyLeaseSignature = runtime.signature;
       effectiveConfig = {
         ...config,
         model: route.profile.model,
@@ -420,6 +433,10 @@ async function runClaudeOneShot(
     const details = error instanceof Error ? error.message : String(error);
     if (details && !errors.some((entry) => entry === details)) {
       errors.push(details);
+    }
+  } finally {
+    if (proxyLeaseSignature) {
+      await claudeProxyManager.release(proxyLeaseSignature);
     }
   }
 

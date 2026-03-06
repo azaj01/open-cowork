@@ -6,8 +6,10 @@ import type {
   PluginCatalogItemV2,
   InstalledPlugin,
   PluginComponentKind,
+  ScheduleConfig,
   ScheduleTask,
   ScheduleRepeatUnit,
+  ScheduleWeekday,
   ScheduleCreateInput,
   ScheduleUpdateInput,
 } from '../types';
@@ -73,6 +75,24 @@ const SERVICE_OPTIONS = [
   { value: 'aws', label: 'AWS' },
   { value: 'azure', label: 'Azure' },
   { value: 'other', label: 'Other' },
+];
+
+type ScheduleFormMode = 'once' | 'daily' | 'weekly' | 'legacy-interval';
+
+const SCHEDULE_TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
+  const hour = String(Math.floor(index / 2)).padStart(2, '0');
+  const minute = index % 2 === 0 ? '00' : '30';
+  return `${hour}:${minute}`;
+});
+
+const WEEKDAY_OPTIONS: Array<{ value: ScheduleWeekday; label: string }> = [
+  { value: 1, label: '周一' },
+  { value: 2, label: '周二' },
+  { value: 3, label: '周三' },
+  { value: 4, label: '周四' },
+  { value: 5, label: '周五' },
+  { value: 6, label: '周六' },
+  { value: 0, label: '周日' },
 ];
 
 // ==================== Main Component ====================
@@ -292,8 +312,8 @@ function APISettingsTab() {
           <Server className="w-4 h-4" />
           {t('api.provider')}
         </label>
-        <div className="grid grid-cols-3 gap-2">
-          {(['openrouter', 'anthropic', 'openai', 'custom'] as const).map((p) => (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          {(['openrouter', 'anthropic', 'openai', 'gemini', 'custom'] as const).map((p) => (
             <button
               key={p}
               onClick={() => changeProvider(p)}
@@ -353,10 +373,11 @@ function APISettingsTab() {
             <Server className="w-4 h-4" />
             {t('api.protocol')}
           </label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             {([
               { id: 'anthropic', label: 'Anthropic' },
               { id: 'openai', label: 'OpenAI' },
+              { id: 'gemini', label: 'Gemini' },
             ] as const).map((mode) => (
               <button
                 key={mode.id}
@@ -389,6 +410,8 @@ function APISettingsTab() {
             placeholder={
               customProtocol === 'openai'
                 ? 'https://api.openai.com/v1'
+                : customProtocol === 'gemini'
+                  ? 'https://generativelanguage.googleapis.com'
                 : (currentPreset?.baseUrl || 'https://api.anthropic.com')
             }
             className="w-full px-4 py-3 rounded-xl bg-background border border-border text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
@@ -396,6 +419,8 @@ function APISettingsTab() {
           <p className="text-xs text-text-muted">
             {customProtocol === 'openai'
               ? t('api.enterOpenAIUrl')
+              : customProtocol === 'gemini'
+                ? 'Enter a Gemini-compatible base URL'
               : t('api.enterAnthropicUrl')}
           </p>
         </div>
@@ -431,6 +456,8 @@ function APISettingsTab() {
                 ? 'openai/gpt-4o or other model ID'
                 : provider === 'openai' || (provider === 'custom' && customProtocol === 'openai')
                   ? 'gpt-4o'
+                  : provider === 'gemini' || (provider === 'custom' && customProtocol === 'gemini')
+                    ? 'gemini/gemini-2.5-flash'
                   : 'claude-sonnet-4'
             }
             className="w-full px-4 py-3 rounded-xl bg-background border border-border text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
@@ -3023,13 +3050,17 @@ function ScheduleTab() {
   const [prompt, setPrompt] = useState('');
   const [cwd, setCwd] = useState('');
   const [runAt, setRunAt] = useState('');
+  const [scheduleMode, setScheduleMode] = useState<ScheduleFormMode>('once');
+  const [selectedTimes, setSelectedTimes] = useState<string[]>(['08:00']);
+  const [selectedWeekdays, setSelectedWeekdays] = useState<ScheduleWeekday[]>([1]);
   const [enabled, setEnabled] = useState(true);
-  const [repeatEnabled, setRepeatEnabled] = useState(false);
   const [repeatEvery, setRepeatEvery] = useState(1);
   const [repeatUnit, setRepeatUnit] = useState<ScheduleRepeatUnit>('day');
   const promptChangedWhileEditing = Boolean(
     editingTaskSnapshot && prompt.trim() !== editingTaskSnapshot.prompt.trim()
   );
+  const scheduleConfig = buildScheduleConfigFromForm(scheduleMode, selectedTimes, selectedWeekdays);
+  const schedulePreview = buildSchedulePreview(scheduleMode, runAt, scheduleConfig);
   const previewTitle = editingId
     ? (promptChangedWhileEditing
       ? '保存后将基于 Prompt 自动生成 [定时任务] 标题'
@@ -3088,9 +3119,26 @@ function ScheduleTab() {
       setError('请输入要执行的 Prompt');
       return;
     }
-    const runAtValue = new Date(runAt).getTime();
+    if (scheduleMode === 'daily' && (!scheduleConfig || scheduleConfig.times.length === 0)) {
+      setError('请至少选择一个每日执行时段');
+      return;
+    }
+    if (scheduleMode === 'weekly') {
+      if (!scheduleConfig || scheduleConfig.kind !== 'weekly' || scheduleConfig.times.length === 0) {
+        setError('请至少选择一个每周执行时段');
+        return;
+      }
+      if (scheduleConfig.weekdays.length === 0) {
+        setError('请至少选择一个执行星期');
+        return;
+      }
+    }
+    const usesDateTimeInput = scheduleMode === 'once' || scheduleMode === 'legacy-interval';
+    const runAtValue = usesDateTimeInput
+      ? new Date(runAt).getTime()
+      : computeNextScheduledRun(scheduleConfig, Date.now());
     if (!Number.isFinite(runAtValue)) {
-      setError('请输入有效的执行时间');
+      setError(usesDateTimeInput ? '请输入有效的执行时间' : '当前规则无法计算下一次执行时间');
       return;
     }
     setIsLoading(true);
@@ -3101,12 +3149,24 @@ function ScheduleTab() {
         const originalRunAtInput = editingTaskSnapshot
           ? toLocalDateTimeInput(editingTaskSnapshot.nextRunAt ?? editingTaskSnapshot.runAt)
           : null;
+        const nextScheduleSignature = buildScheduleSignatureFromForm(
+          scheduleMode,
+          runAt,
+          selectedTimes,
+          selectedWeekdays,
+          repeatEvery,
+          repeatUnit
+        );
+        const originalScheduleSignature = editingTaskSnapshot
+          ? buildScheduleSignatureFromTask(editingTaskSnapshot)
+          : null;
         const shouldRegenerateTitle = (
           !editingTaskSnapshot ||
           trimmedPrompt !== editingTaskSnapshot.prompt.trim()
         );
         const shouldResetScheduleTime = (
           !editingTaskSnapshot ||
+          nextScheduleSignature !== originalScheduleSignature ||
           runAt !== originalRunAtInput ||
           (enabled && editingTaskSnapshot.nextRunAt === null)
         );
@@ -3117,8 +3177,9 @@ function ScheduleTab() {
         const payload: ScheduleUpdateInput = {
           cwd: cwd.trim() || workingDir || '',
           enabled,
-          repeatEvery: repeatEnabled ? repeatEvery : null,
-          repeatUnit: repeatEnabled ? repeatUnit : null,
+          scheduleConfig,
+          repeatEvery: scheduleMode === 'legacy-interval' ? repeatEvery : null,
+          repeatUnit: scheduleMode === 'legacy-interval' ? repeatUnit : null,
         };
         if (shouldRegenerateTitle) {
           payload.prompt = trimmedPrompt;
@@ -3142,9 +3203,10 @@ function ScheduleTab() {
           cwd: cwd.trim() || workingDir || '',
           runAt: runAtValue,
           nextRunAt: runAtValue,
+          scheduleConfig,
           enabled,
-          repeatEvery: repeatEnabled ? repeatEvery : null,
-          repeatUnit: repeatEnabled ? repeatUnit : null,
+          repeatEvery: scheduleMode === 'legacy-interval' ? repeatEvery : null,
+          repeatUnit: scheduleMode === 'legacy-interval' ? repeatUnit : null,
         };
         await window.electronAPI.schedule.create(payload);
         setSuccess('定时任务已创建');
@@ -3252,7 +3314,11 @@ function ScheduleTab() {
     setCwd(task.cwd);
     setRunAt(toLocalDateTimeInput(task.nextRunAt ?? task.runAt));
     setEnabled(task.enabled);
-    setRepeatEnabled(Boolean(task.repeatEvery && task.repeatUnit));
+    setScheduleMode(detectScheduleMode(task));
+    setSelectedTimes(task.scheduleConfig?.times ?? ['08:00']);
+    setSelectedWeekdays(
+      task.scheduleConfig?.kind === 'weekly' ? task.scheduleConfig.weekdays : [1]
+    );
     setRepeatEvery(task.repeatEvery ?? 1);
     setRepeatUnit(task.repeatUnit ?? 'day');
     setError('');
@@ -3266,8 +3332,10 @@ function ScheduleTab() {
     setPrompt('');
     setCwd(workingDir || '');
     setRunAt(toLocalDateTimeInput(defaultRunAt));
+    setScheduleMode('once');
+    setSelectedTimes(['08:00']);
+    setSelectedWeekdays([1]);
     setEnabled(true);
-    setRepeatEnabled(false);
     setRepeatEvery(1);
     setRepeatUnit('day');
   }
@@ -3315,50 +3383,104 @@ function ScheduleTab() {
           placeholder="执行目录（默认当前工作目录）"
           className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm"
         />
-        <div className="grid grid-cols-2 gap-2">
-          <input
-            type="datetime-local"
-            value={runAt}
-            onChange={(e) => setRunAt(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm"
-          />
-          <label className="flex items-center gap-2 px-3 py-2 rounded-lg bg-background border border-border text-sm text-text-secondary">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-            />
-            启用
-          </label>
-        </div>
-        <label className="flex items-center gap-2 text-sm text-text-secondary">
-          <input
-            type="checkbox"
-            checked={repeatEnabled}
-            onChange={(e) => setRepeatEnabled(e.target.checked)}
-          />
-          重复执行
-        </label>
-        {repeatEnabled && (
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="number"
-              min={1}
-              value={repeatEvery}
-              onChange={(e) => setRepeatEvery(Math.max(1, Number(e.target.value) || 1))}
-              className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm"
-            />
-            <select
-              value={repeatUnit}
-              onChange={(e) => setRepeatUnit(e.target.value as ScheduleRepeatUnit)}
-              className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm"
-            >
-              <option value="minute">分钟</option>
-              <option value="hour">小时</option>
-              <option value="day">天</option>
-            </select>
+        <div className="rounded-lg border border-border bg-background p-3 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-medium text-text-primary">执行时间</div>
+              <div className="text-xs text-text-muted">
+                新任务优先使用多时段模式，旧版间隔任务仍可兼容编辑
+              </div>
+            </div>
+            <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-sm text-text-secondary">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+              />
+              启用
+            </label>
           </div>
-        )}
+          <div className="grid grid-cols-3 gap-2">
+            <ScheduleModeButton
+              active={scheduleMode === 'once'}
+              label="单次"
+              onClick={() => setScheduleMode('once')}
+            />
+            <ScheduleModeButton
+              active={scheduleMode === 'daily'}
+              label="每天"
+              onClick={() => setScheduleMode('daily')}
+            />
+            <ScheduleModeButton
+              active={scheduleMode === 'weekly'}
+              label="每周"
+              onClick={() => setScheduleMode('weekly')}
+            />
+          </div>
+          {scheduleMode === 'legacy-interval' && (
+            <div className="rounded-lg border border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">
+              当前任务来自旧版“固定间隔”规则，保存时会继续保留该模式。
+            </div>
+          )}
+          {(scheduleMode === 'once' || scheduleMode === 'legacy-interval') && (
+            <input
+              type="datetime-local"
+              value={runAt}
+              onChange={(e) => setRunAt(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
+            />
+          )}
+          {scheduleMode === 'daily' && (
+            <div className="space-y-2">
+              <div className="text-xs text-text-muted">每天在这些时段自动执行</div>
+              <TimeSlotPicker
+                selectedTimes={selectedTimes}
+                onToggle={(time) => setSelectedTimes((current) => toggleTimeValue(current, time))}
+              />
+            </div>
+          )}
+          {scheduleMode === 'weekly' && (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <div className="text-xs text-text-muted">选择执行星期</div>
+                <WeekdayPicker
+                  selectedWeekdays={selectedWeekdays}
+                  onToggle={(weekday) => {
+                    setSelectedWeekdays((current) => toggleWeekdayValue(current, weekday));
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="text-xs text-text-muted">选择每周多时段</div>
+                <TimeSlotPicker
+                  selectedTimes={selectedTimes}
+                  onToggle={(time) => setSelectedTimes((current) => toggleTimeValue(current, time))}
+                />
+              </div>
+            </div>
+          )}
+          {scheduleMode === 'legacy-interval' && (
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="number"
+                min={1}
+                value={repeatEvery}
+                onChange={(e) => setRepeatEvery(Math.max(1, Number(e.target.value) || 1))}
+                className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
+              />
+              <select
+                value={repeatUnit}
+                onChange={(e) => setRepeatUnit(e.target.value as ScheduleRepeatUnit)}
+                className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
+              >
+                <option value="minute">分钟</option>
+                <option value="hour">小时</option>
+                <option value="day">天</option>
+              </select>
+            </div>
+          )}
+          <div className="text-xs text-text-muted">{schedulePreview}</div>
+        </div>
         <div className="flex items-center gap-2">
           <button
             onClick={submitTask}
@@ -3501,6 +3623,15 @@ function formatTime(timestamp: number): string {
 }
 
 function formatScheduleRule(task: ScheduleTask): string {
+  if (task.scheduleConfig?.kind === 'daily') {
+    return `每天 ${task.scheduleConfig.times.join('、')}`;
+  }
+  if (task.scheduleConfig?.kind === 'weekly') {
+    const weekdays = task.scheduleConfig.weekdays
+      .map((weekday) => WEEKDAY_OPTIONS.find((option) => option.value === weekday)?.label ?? '未知')
+      .join('、');
+    return `每周 ${weekdays} · ${task.scheduleConfig.times.join('、')}`;
+  }
   if (!task.repeatEvery || !task.repeatUnit) {
     return '一次性';
   }
@@ -3511,6 +3642,222 @@ function formatScheduleRule(task: ScheduleTask): string {
     return `每 ${task.repeatEvery} 小时`;
   }
   return `每 ${task.repeatEvery} 天`;
+}
+
+function ScheduleModeButton(props: { active: boolean; label: string; onClick: () => void }) {
+  const { active, label, onClick } = props;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-3 py-2 rounded-lg border text-sm transition-colors ${
+        active
+          ? 'border-accent bg-accent/10 text-accent'
+          : 'border-border bg-surface text-text-secondary hover:bg-surface-hover'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function TimeSlotPicker(props: { selectedTimes: string[]; onToggle: (time: string) => void }) {
+  const { selectedTimes, onToggle } = props;
+  return (
+    <div className="grid grid-cols-4 gap-2">
+      {SCHEDULE_TIME_OPTIONS.map((time) => {
+        const active = selectedTimes.includes(time);
+        return (
+          <button
+            key={time}
+            type="button"
+            onClick={() => onToggle(time)}
+            className={`px-3 py-2 rounded-lg border text-sm transition-colors ${
+              active
+                ? 'border-accent bg-accent/10 text-accent'
+                : 'border-border bg-surface text-text-secondary hover:bg-surface-hover'
+            }`}
+          >
+            {time}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function WeekdayPicker(props: {
+  selectedWeekdays: ScheduleWeekday[];
+  onToggle: (weekday: ScheduleWeekday) => void;
+}) {
+  const { selectedWeekdays, onToggle } = props;
+  return (
+    <div className="grid grid-cols-4 gap-2">
+      {WEEKDAY_OPTIONS.map((option) => {
+        const active = selectedWeekdays.includes(option.value);
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onToggle(option.value)}
+            className={`px-3 py-2 rounded-lg border text-sm transition-colors ${
+              active
+                ? 'border-accent bg-accent/10 text-accent'
+                : 'border-border bg-surface text-text-secondary hover:bg-surface-hover'
+            }`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function detectScheduleMode(task: ScheduleTask): ScheduleFormMode {
+  if (task.scheduleConfig?.kind === 'daily') {
+    return 'daily';
+  }
+  if (task.scheduleConfig?.kind === 'weekly') {
+    return 'weekly';
+  }
+  if (task.repeatEvery && task.repeatUnit) {
+    return 'legacy-interval';
+  }
+  return 'once';
+}
+
+function buildScheduleConfigFromForm(
+  mode: ScheduleFormMode,
+  times: string[],
+  weekdays: ScheduleWeekday[]
+): ScheduleConfig | null {
+  const normalizedTimes = Array.from(new Set(times)).sort();
+  if (mode === 'daily' && normalizedTimes.length > 0) {
+    return { kind: 'daily', times: normalizedTimes };
+  }
+  if (mode === 'weekly' && normalizedTimes.length > 0 && weekdays.length > 0) {
+    return {
+      kind: 'weekly',
+      weekdays: Array.from(new Set(weekdays)).sort((left, right) => left - right),
+      times: normalizedTimes,
+    };
+  }
+  return null;
+}
+
+function buildScheduleSignatureFromTask(task: ScheduleTask): string {
+  if (task.scheduleConfig) {
+    return JSON.stringify(task.scheduleConfig);
+  }
+  if (task.repeatEvery && task.repeatUnit) {
+    return JSON.stringify({
+      mode: 'legacy-interval',
+      runAt: toLocalDateTimeInput(task.nextRunAt ?? task.runAt),
+      repeatEvery: task.repeatEvery,
+      repeatUnit: task.repeatUnit,
+    });
+  }
+  return JSON.stringify({
+    mode: 'once',
+    runAt: toLocalDateTimeInput(task.nextRunAt ?? task.runAt),
+  });
+}
+
+function buildScheduleSignatureFromForm(
+  mode: ScheduleFormMode,
+  runAt: string,
+  times: string[],
+  weekdays: ScheduleWeekday[],
+  repeatEvery: number,
+  repeatUnit: ScheduleRepeatUnit
+): string {
+  if (mode === 'daily' || mode === 'weekly') {
+    return JSON.stringify(buildScheduleConfigFromForm(mode, times, weekdays));
+  }
+  if (mode === 'legacy-interval') {
+    return JSON.stringify({ mode, runAt, repeatEvery, repeatUnit });
+  }
+  return JSON.stringify({ mode, runAt });
+}
+
+function buildSchedulePreview(
+  mode: ScheduleFormMode,
+  runAt: string,
+  scheduleConfig: ScheduleConfig | null
+): string {
+  if (mode === 'once' || mode === 'legacy-interval') {
+    const timestamp = new Date(runAt).getTime();
+    return Number.isFinite(timestamp)
+      ? `下次预计执行：${formatTime(timestamp)}`
+      : '请选择有效的执行时间';
+  }
+  const nextRunAt = computeNextScheduledRun(scheduleConfig, Date.now());
+  return nextRunAt === null
+    ? '请至少选择一个有效时段'
+    : `系统将自动找到下一档执行时间：${formatTime(nextRunAt)}`;
+}
+
+function computeNextScheduledRun(
+  scheduleConfig: ScheduleConfig | null,
+  now: number
+): number | null {
+  if (!scheduleConfig || scheduleConfig.times.length === 0) {
+    return null;
+  }
+  const allowedWeekdays = scheduleConfig.kind === 'weekly'
+    ? new Set(scheduleConfig.weekdays)
+    : null;
+  const nowDate = new Date(now);
+
+  for (let dayOffset = 0; dayOffset <= 14; dayOffset += 1) {
+    const candidateDate = new Date(
+      nowDate.getFullYear(),
+      nowDate.getMonth(),
+      nowDate.getDate() + dayOffset,
+      0,
+      0,
+      0,
+      0
+    );
+    if (allowedWeekdays && !allowedWeekdays.has(candidateDate.getDay() as ScheduleWeekday)) {
+      continue;
+    }
+    for (const time of scheduleConfig.times) {
+      const [hour, minute] = time.split(':').map(Number);
+      const candidate = new Date(
+        candidateDate.getFullYear(),
+        candidateDate.getMonth(),
+        candidateDate.getDate(),
+        hour,
+        minute,
+        0,
+        0
+      ).getTime();
+      if (candidate > now) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
+function toggleTimeValue(current: string[], target: string): string[] {
+  const next = current.includes(target)
+    ? current.filter((value) => value !== target)
+    : [...current, target];
+  return next.sort();
+}
+
+function toggleWeekdayValue(
+  current: ScheduleWeekday[],
+  target: ScheduleWeekday
+): ScheduleWeekday[] {
+  const next = current.includes(target)
+    ? current.filter((value) => value !== target)
+    : [...current, target];
+  return next.sort((left, right) => left - right);
 }
 
 // ==================== Language Tab ====================

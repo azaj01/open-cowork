@@ -13,10 +13,11 @@ interface ConfigModalProps {
   isFirstRun?: boolean;
 }
 
-const PROVIDER_LABELS: Record<'openrouter' | 'anthropic' | 'openai' | 'custom', string> = {
+const PROVIDER_LABELS: Record<'openrouter' | 'anthropic' | 'openai' | 'gemini' | 'custom', string> = {
   openrouter: 'OpenRouter',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
+  gemini: 'Gemini',
   custom: 'Custom',
 };
 
@@ -172,8 +173,8 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
               <Server className="w-4 h-4" />
               {t('api.provider')}
             </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {(['openrouter', 'anthropic', 'openai', 'custom'] as const).map((p) => (
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              {(['openrouter', 'anthropic', 'openai', 'gemini', 'custom'] as const).map((p) => (
                 <button
                   key={p}
                   onClick={() => changeProvider(p)}
@@ -234,10 +235,11 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
                 <Server className="w-4 h-4" />
                 {t('api.protocol')}
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 {([
                   { id: 'anthropic', label: 'Anthropic' },
                   { id: 'openai', label: 'OpenAI' },
+                  { id: 'gemini', label: 'Gemini' },
                 ] as const).map((mode) => (
                   <button
                     key={mode.id}
@@ -270,6 +272,8 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
                 placeholder={
                   customProtocol === 'openai'
                     ? 'https://api.openai.com/v1'
+                    : customProtocol === 'gemini'
+                      ? 'https://generativelanguage.googleapis.com'
                     : (currentPreset?.baseUrl || 'https://api.anthropic.com')
                 }
                 className="w-full px-4 py-3 rounded-xl bg-background border border-border text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
@@ -277,6 +281,8 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
               <p className="text-xs text-text-muted">
                 {customProtocol === 'openai'
                   ? t('api.enterOpenAIUrl')
+                  : customProtocol === 'gemini'
+                    ? 'Enter a Gemini-compatible base URL'
                   : t('api.enterAnthropicUrl')}
               </p>
             </div>
@@ -312,6 +318,8 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
                     ? 'openai/gpt-4o or other model ID'
                     : provider === 'openai' || (provider === 'custom' && customProtocol === 'openai')
                       ? 'gpt-4o'
+                      : provider === 'gemini' || (provider === 'custom' && customProtocol === 'gemini')
+                        ? 'gemini/gemini-2.5-flash'
                       : 'claude-sonnet-4'
                 }
                 className="w-full px-4 py-3 rounded-xl bg-background border border-border text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"

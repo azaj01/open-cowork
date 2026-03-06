@@ -81,6 +81,7 @@ app = FastAPI()
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GEMINI_BASE_URL = os.environ.get("GEMINI_BASE_URL", "").strip()
 
 # Get Vertex AI project and location from environment (if set)
 VERTEX_PROJECT = os.environ.get("VERTEX_PROJECT", "unset")
@@ -91,6 +92,7 @@ USE_VERTEX_AUTH = os.environ.get("USE_VERTEX_AUTH", "False").lower() == "true"
 
 # Get OpenAI base URL from environment (if set)
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL")
+OPENAI_DEFAULT_HEADERS_JSON = os.environ.get("OPENAI_DEFAULT_HEADERS_JSON", "").strip()
 
 # Get preferred provider (default to openai)
 PREFERRED_PROVIDER = os.environ.get("PREFERRED_PROVIDER", "openai").lower()
@@ -99,6 +101,29 @@ PREFERRED_PROVIDER = os.environ.get("PREFERRED_PROVIDER", "openai").lower()
 # Default to latest OpenAI models if not set
 BIG_MODEL = os.environ.get("BIG_MODEL", "gpt-4.1")
 SMALL_MODEL = os.environ.get("SMALL_MODEL", "gpt-4.1-mini")
+
+def parse_openai_default_headers(raw_value: str) -> Optional[Dict[str, str]]:
+    if not raw_value:
+        return None
+    try:
+        parsed = json.loads(raw_value)
+    except Exception as exc:
+        logger.warning(f"Failed to parse OPENAI_DEFAULT_HEADERS_JSON: {exc}")
+        return None
+
+    if not isinstance(parsed, dict):
+        logger.warning("OPENAI_DEFAULT_HEADERS_JSON must be a JSON object")
+        return None
+
+    headers: Dict[str, str] = {}
+    for key, value in parsed.items():
+        key_text = str(key).strip()
+        if not key_text or value is None:
+            continue
+        headers[key_text] = str(value)
+    return headers or None
+
+OPENAI_DEFAULT_HEADERS = parse_openai_default_headers(OPENAI_DEFAULT_HEADERS_JSON)
 
 # List of OpenAI models
 OPENAI_MODELS = [
@@ -1139,6 +1164,15 @@ async def create_message(
             if isinstance(litellm_request.get("model"), str) and not str(litellm_request["model"]).startswith("openai/"):
                 litellm_request["model"] = f"openai/{litellm_request['model']}"
 
+            if OPENAI_DEFAULT_HEADERS:
+                existing_headers = litellm_request.get("extra_headers") or {}
+                if not isinstance(existing_headers, dict):
+                    existing_headers = {}
+                litellm_request["extra_headers"] = {
+                    **OPENAI_DEFAULT_HEADERS,
+                    **existing_headers,
+                }
+
             # OpenAI-compatible upstreams require explicit storage opt-out.
             litellm_request["store"] = False
             if OPENAI_BASE_URL:
@@ -1156,7 +1190,11 @@ async def create_message(
                 logger.debug(f"Using Gemini ADC with project={VERTEX_PROJECT}, location={VERTEX_LOCATION} and model: {request.model}")
             else:
                 litellm_request["api_key"] = GEMINI_API_KEY
-                logger.debug(f"Using Gemini API key for model: {request.model}")
+                if GEMINI_BASE_URL:
+                    litellm_request["api_base"] = GEMINI_BASE_URL
+                    logger.debug(f"Using Gemini API key and custom base URL {GEMINI_BASE_URL} for model: {request.model}")
+                else:
+                    logger.debug(f"Using Gemini API key for model: {request.model}")
         else:
             litellm_request["api_key"] = ANTHROPIC_API_KEY
             logger.debug(f"Using Anthropic API key for model: {request.model}")
@@ -1461,7 +1499,9 @@ async def count_tokens(
             # Add custom base URL for OpenAI models if configured
             if request.model.startswith("openai/") and OPENAI_BASE_URL:
                 token_counter_args["api_base"] = OPENAI_BASE_URL
-            
+            elif request.model.startswith("gemini/") and GEMINI_BASE_URL:
+                token_counter_args["api_base"] = GEMINI_BASE_URL
+
             # Count tokens
             token_count = token_counter(**token_counter_args)
             

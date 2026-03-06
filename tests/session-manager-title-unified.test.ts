@@ -8,6 +8,42 @@ vi.mock('electron', () => ({
   },
 }));
 
+vi.mock('electron-store', () => {
+  class MockStore<T extends Record<string, unknown>> {
+    public store: Record<string, unknown>;
+    public path = '/tmp/mock-session-manager-title-config-store.json';
+
+    constructor(options: { defaults?: Record<string, unknown> }) {
+      this.store = {
+        ...(options?.defaults || {}),
+      };
+    }
+
+    get<K extends keyof T>(key: K): T[K] {
+      return this.store[key as string] as T[K];
+    }
+
+    set(key: string | Record<string, unknown>, value?: unknown): void {
+      if (typeof key === 'string') {
+        this.store[key] = value;
+        return;
+      }
+      this.store = {
+        ...this.store,
+        ...key,
+      };
+    }
+
+    clear(): void {
+      this.store = {};
+    }
+  }
+
+  return {
+    default: MockStore,
+  };
+});
+
 vi.mock('../src/main/claude/agent-runner', () => ({
   ClaudeAgentRunner: class {
     run = vi.fn();
@@ -46,6 +82,7 @@ describe('SessionManager unified title generation', () => {
     provider: configStore.get('provider'),
     customProtocol: configStore.get('customProtocol'),
     apiKey: configStore.get('apiKey'),
+    baseUrl: configStore.get('baseUrl'),
     model: configStore.get('model'),
   };
 
@@ -67,6 +104,7 @@ describe('SessionManager unified title generation', () => {
     configStore.set('provider', previous.provider);
     configStore.set('customProtocol', previous.customProtocol);
     configStore.set('apiKey', previous.apiKey);
+    configStore.set('baseUrl', previous.baseUrl);
     configStore.set('model', previous.model);
     vi.restoreAllMocks();
   });
@@ -85,6 +123,33 @@ describe('SessionManager unified title generation', () => {
       expect.objectContaining({
         provider: 'openai',
         model: 'gpt-4.1',
+      }),
+      undefined
+    );
+  });
+
+  it('routes gemini title generation through Claude SDK even when unified mode flag is disabled', async () => {
+    process.env.COWORK_DISABLE_CLAUDE_UNIFIED = '1';
+    configStore.set('provider', 'gemini');
+    configStore.set('customProtocol', 'gemini');
+    configStore.set('apiKey', 'AIza-test');
+    configStore.set('baseUrl', 'https://generativelanguage.googleapis.com');
+    configStore.set('model', 'gemini/gemini-2.5-flash');
+
+    const proto = SessionManager.prototype as unknown as {
+      generateTitleWithConfig(titlePrompt: string): Promise<string | null>;
+    };
+
+    const title = await proto.generateTitleWithConfig.call({}, 'Please generate title');
+
+    expect(title).toBe('Unified Title');
+    expect(mockedGenerateTitleWithClaudeSdk).toHaveBeenCalledTimes(1);
+    expect(mockedGenerateTitleWithClaudeSdk).toHaveBeenCalledWith(
+      'Please generate title',
+      expect.objectContaining({
+        provider: 'gemini',
+        customProtocol: 'gemini',
+        model: 'gemini/gemini-2.5-flash',
       }),
       undefined
     );
