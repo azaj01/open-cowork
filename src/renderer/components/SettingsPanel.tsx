@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Key, Plug, Settings, ChevronRight, AlertCircle, Eye, EyeOff, Plus, Trash2, Edit3, Save, Mail, Globe, Lock, Server, Cpu, Loader2, Power, PowerOff, CheckCircle, ChevronDown, Package, Languages, Shield, Wifi, FolderOpen, RefreshCw, Clock3 } from 'lucide-react';
+import { X, Key, Plug, Settings, ChevronRight, AlertCircle, Eye, EyeOff, Plus, Trash2, Edit3, Save, Mail, Globe, Lock, Server, Cpu, Loader2, Power, PowerOff, CheckCircle, Check, ChevronDown, Package, Languages, Shield, Wifi, FolderOpen, RefreshCw, Clock3 } from 'lucide-react';
 import type {
   Skill,
   PluginCatalogItemV2,
@@ -79,7 +79,7 @@ const SERVICE_OPTIONS = [
 
 type ScheduleFormMode = 'once' | 'daily' | 'weekly' | 'legacy-interval';
 
-const SCHEDULE_TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
+const SCHEDULE_TIME_SUGGESTIONS = Array.from({ length: 48 }, (_, index) => {
   const hour = String(Math.floor(index / 2)).padStart(2, '0');
   const minute = index % 2 === 0 ? '00' : '30';
   return `${hour}:${minute}`;
@@ -93,6 +93,12 @@ const WEEKDAY_OPTIONS: Array<{ value: ScheduleWeekday; label: string }> = [
   { value: 5, label: '周五' },
   { value: 6, label: '周六' },
   { value: 0, label: '周日' },
+];
+
+const SCHEDULE_MODE_OPTIONS: Array<{ value: ScheduleFormMode; label: string }> = [
+  { value: 'once', label: '单次' },
+  { value: 'daily', label: '每天' },
+  { value: 'weekly', label: '每周' },
 ];
 
 // ==================== Main Component ====================
@@ -3061,6 +3067,10 @@ function ScheduleTab() {
   );
   const scheduleConfig = buildScheduleConfigFromForm(scheduleMode, selectedTimes, selectedWeekdays);
   const schedulePreview = buildSchedulePreview(scheduleMode, runAt, scheduleConfig);
+  const selectedWeekdayLabels = selectedWeekdays
+    .map((weekday) => WEEKDAY_OPTIONS.find((option) => option.value === weekday)?.label ?? '未知')
+    .join(', ');
+  const selectedTimeLabels = selectedTimes.join(', ');
   const previewTitle = editingId
     ? (promptChangedWhileEditing
       ? '保存后将基于 Prompt 自动生成 [定时任务] 标题'
@@ -3134,10 +3144,10 @@ function ScheduleTab() {
       }
     }
     const usesDateTimeInput = scheduleMode === 'once' || scheduleMode === 'legacy-interval';
-    const runAtValue = usesDateTimeInput
+    const runAtValue: number | null = usesDateTimeInput
       ? new Date(runAt).getTime()
       : computeNextScheduledRun(scheduleConfig, Date.now());
-    if (!Number.isFinite(runAtValue)) {
+    if (runAtValue === null || !Number.isFinite(runAtValue)) {
       setError(usesDateTimeInput ? '请输入有效的执行时间' : '当前规则无法计算下一次执行时间');
       return;
     }
@@ -3400,22 +3410,35 @@ function ScheduleTab() {
               启用
             </label>
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            <ScheduleModeButton
-              active={scheduleMode === 'once'}
-              label="单次"
-              onClick={() => setScheduleMode('once')}
+          <div className={`grid gap-2 ${scheduleMode === 'weekly' ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
+            <ScheduleSelectMenu
+              label="执行模式"
+              options={SCHEDULE_MODE_OPTIONS}
+              value={scheduleMode}
+              onChange={(value) => setScheduleMode(value as ScheduleFormMode)}
             />
-            <ScheduleModeButton
-              active={scheduleMode === 'daily'}
-              label="每天"
-              onClick={() => setScheduleMode('daily')}
-            />
-            <ScheduleModeButton
-              active={scheduleMode === 'weekly'}
-              label="每周"
-              onClick={() => setScheduleMode('weekly')}
-            />
+            {scheduleMode === 'weekly' && (
+              <ScheduleSelectMenu
+                label="执行星期"
+                options={WEEKDAY_OPTIONS}
+                values={selectedWeekdays}
+                placeholder="选择星期"
+                summary={selectedWeekdayLabels}
+                onToggle={(value) => {
+                  setSelectedWeekdays((current) => toggleWeekdayValue(current, value as ScheduleWeekday));
+                }}
+              />
+            )}
+            {(scheduleMode === 'daily' || scheduleMode === 'weekly') && (
+              <TimeMultiSelectMenu
+                label="执行时段"
+                values={selectedTimes}
+                placeholder="选择时间"
+                summary={selectedTimeLabels}
+                onAdd={(value) => setSelectedTimes((current) => toggleTimeValue(current, value))}
+                onRemove={(value) => setSelectedTimes((current) => toggleTimeValue(current, value))}
+              />
+            )}
           </div>
           {scheduleMode === 'legacy-interval' && (
             <div className="rounded-lg border border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">
@@ -3423,40 +3446,16 @@ function ScheduleTab() {
             </div>
           )}
           {(scheduleMode === 'once' || scheduleMode === 'legacy-interval') && (
-            <input
-              type="datetime-local"
-              value={runAt}
-              onChange={(e) => setRunAt(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
-            />
-          )}
-          {scheduleMode === 'daily' && (
             <div className="space-y-2">
-              <div className="text-xs text-text-muted">每天在这些时段自动执行</div>
-              <TimeSlotPicker
-                selectedTimes={selectedTimes}
-                onToggle={(time) => setSelectedTimes((current) => toggleTimeValue(current, time))}
+              <div className="text-xs text-text-muted">
+                {scheduleMode === 'once' ? '选择单次执行时间' : '选择旧版间隔任务的起始时间'}
+              </div>
+              <input
+                type="datetime-local"
+                value={runAt}
+                onChange={(e) => setRunAt(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
               />
-            </div>
-          )}
-          {scheduleMode === 'weekly' && (
-            <div className="space-y-3">
-              <div className="space-y-2">
-                <div className="text-xs text-text-muted">选择执行星期</div>
-                <WeekdayPicker
-                  selectedWeekdays={selectedWeekdays}
-                  onToggle={(weekday) => {
-                    setSelectedWeekdays((current) => toggleWeekdayValue(current, weekday));
-                  }}
-                />
-              </div>
-              <div className="space-y-2">
-                <div className="text-xs text-text-muted">选择每周多时段</div>
-                <TimeSlotPicker
-                  selectedTimes={selectedTimes}
-                  onToggle={(time) => setSelectedTimes((current) => toggleTimeValue(current, time))}
-                />
-              </div>
             </div>
           )}
           {scheduleMode === 'legacy-interval' && (
@@ -3478,6 +3477,12 @@ function ScheduleTab() {
                 <option value="day">天</option>
               </select>
             </div>
+          )}
+          {scheduleMode === 'daily' && (
+            <div className="text-xs text-text-muted">每天在这些时段自动执行</div>
+          )}
+          {scheduleMode === 'weekly' && (
+            <div className="text-xs text-text-muted">每周在选中的星期与时段自动执行</div>
           )}
           <div className="text-xs text-text-muted">{schedulePreview}</div>
         </div>
@@ -3644,72 +3649,232 @@ function formatScheduleRule(task: ScheduleTask): string {
   return `每 ${task.repeatEvery} 天`;
 }
 
-function ScheduleModeButton(props: { active: boolean; label: string; onClick: () => void }) {
-  const { active, label, onClick } = props;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`px-3 py-2 rounded-lg border text-sm transition-colors ${
-        active
-          ? 'border-accent bg-accent/10 text-accent'
-          : 'border-border bg-surface text-text-secondary hover:bg-surface-hover'
-      }`}
-    >
-      {label}
-    </button>
+function ScheduleSelectMenu(props: {
+  label: string;
+  options: Array<{ value: string | number; label: string }>;
+  value?: string | number;
+  values?: Array<string | number>;
+  placeholder?: string;
+  summary?: string;
+  onChange?: (value: string | number) => void;
+  onToggle?: (value: string | number) => void;
+}) {
+  const {
+    label,
+    options,
+    value,
+    values = [],
+    placeholder = '请选择',
+    summary,
+    onChange,
+    onToggle,
+  } = props;
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const isMulti = typeof onToggle === 'function';
+  const buttonText = summary || (
+    isMulti
+      ? (values.length > 0
+        ? values
+          .map((item) => options.find((option) => option.value === item)?.label ?? String(item))
+          .join(', ')
+        : placeholder)
+      : (options.find((option) => option.value === value)?.label ?? placeholder)
   );
-}
 
-function TimeSlotPicker(props: { selectedTimes: string[]; onToggle: (time: string) => void }) {
-  const { selectedTimes, onToggle } = props;
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, []);
+
   return (
-    <div className="grid grid-cols-4 gap-2">
-      {SCHEDULE_TIME_OPTIONS.map((time) => {
-        const active = selectedTimes.includes(time);
-        return (
-          <button
-            key={time}
-            type="button"
-            onClick={() => onToggle(time)}
-            className={`px-3 py-2 rounded-lg border text-sm transition-colors ${
-              active
-                ? 'border-accent bg-accent/10 text-accent'
-                : 'border-border bg-surface text-text-secondary hover:bg-surface-hover'
-            }`}
-          >
-            {time}
-          </button>
-        );
-      })}
+    <div ref={containerRef} className="relative">
+      <div className="mb-1 text-xs text-text-muted">{label}</div>
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+          open
+            ? 'border-accent bg-surface text-text-primary'
+            : 'border-border bg-surface text-text-secondary hover:bg-surface-hover'
+        }`}
+      >
+        <span className="truncate">{buttonText}</span>
+        <ChevronDown className={`h-4 w-4 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 max-h-64 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-2xl">
+          {options.map((option) => {
+            const selected = isMulti
+              ? values.includes(option.value)
+              : option.value === value;
+            return (
+              <button
+                key={String(option.value)}
+                type="button"
+                onClick={() => {
+                  if (isMulti) {
+                    onToggle?.(option.value);
+                    return;
+                  }
+                  onChange?.(option.value);
+                  setOpen(false);
+                }}
+                className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
+                  selected
+                    ? 'bg-accent/10 text-accent'
+                    : 'text-text-secondary hover:bg-surface-hover'
+                }`}
+              >
+                <span>{option.label}</span>
+                {selected && <Check className="h-4 w-4" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
-function WeekdayPicker(props: {
-  selectedWeekdays: ScheduleWeekday[];
-  onToggle: (weekday: ScheduleWeekday) => void;
+function TimeMultiSelectMenu(props: {
+  label: string;
+  values: string[];
+  placeholder?: string;
+  summary?: string;
+  onAdd: (value: string) => void;
+  onRemove: (value: string) => void;
 }) {
-  const { selectedWeekdays, onToggle } = props;
+  const {
+    label,
+    values,
+    placeholder = '选择时间',
+    summary,
+    onAdd,
+    onRemove,
+  } = props;
+  const [open, setOpen] = useState(false);
+  const [draftTime, setDraftTime] = useState('');
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const buttonText = summary || (values.length > 0 ? values.join(', ') : placeholder);
+
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, []);
+
+  function addDraftTime() {
+    if (!isValidTimeValue(draftTime)) {
+      return;
+    }
+    onAdd(draftTime);
+    setDraftTime('');
+  }
+
   return (
-    <div className="grid grid-cols-4 gap-2">
-      {WEEKDAY_OPTIONS.map((option) => {
-        const active = selectedWeekdays.includes(option.value);
-        return (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onToggle(option.value)}
-            className={`px-3 py-2 rounded-lg border text-sm transition-colors ${
-              active
-                ? 'border-accent bg-accent/10 text-accent'
-                : 'border-border bg-surface text-text-secondary hover:bg-surface-hover'
-            }`}
-          >
-            {option.label}
-          </button>
-        );
-      })}
+    <div ref={containerRef} className="relative">
+      <div className="mb-1 text-xs text-text-muted">{label}</div>
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+          open
+            ? 'border-accent bg-surface text-text-primary'
+            : 'border-border bg-surface text-text-secondary hover:bg-surface-hover'
+        }`}
+      >
+        <span className="truncate">{buttonText}</span>
+        <ChevronDown className={`h-4 w-4 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-xl border border-border bg-surface p-3 shadow-2xl">
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <div className="text-xs text-text-muted">可手动输入任意 HH:mm</div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="time"
+                  step={60}
+                  value={draftTime}
+                  onChange={(event) => setDraftTime(event.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-text-primary"
+                />
+                <button
+                  type="button"
+                  onClick={addDraftTime}
+                  disabled={!isValidTimeValue(draftTime)}
+                  className="inline-flex items-center gap-1 rounded-lg bg-accent px-3 py-2 text-sm text-white disabled:opacity-50"
+                >
+                  <Plus className="h-4 w-4" />
+                  添加
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs text-text-muted">已选时段</div>
+              {values.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {values.map((time) => (
+                    <button
+                      key={time}
+                      type="button"
+                      onClick={() => onRemove(time)}
+                      className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-sm text-accent"
+                    >
+                      <span>{time}</span>
+                      <X className="h-3 w-3" />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-text-muted">还没有选择时段</div>
+              )}
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs text-text-muted">快捷建议</div>
+              <div className="max-h-40 overflow-y-auto">
+                <div className="grid grid-cols-4 gap-2">
+                  {SCHEDULE_TIME_SUGGESTIONS.map((time) => {
+                    const selected = values.includes(time);
+                    return (
+                      <button
+                        key={time}
+                        type="button"
+                        onClick={() => {
+                          if (selected) {
+                            onRemove(time);
+                            return;
+                          }
+                          onAdd(time);
+                        }}
+                        className={`rounded-lg border px-2 py-2 text-sm transition-colors ${
+                          selected
+                            ? 'border-accent bg-accent/10 text-accent'
+                            : 'border-border bg-background text-text-secondary hover:bg-surface-hover'
+                        }`}
+                      >
+                        {time}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3844,6 +4009,9 @@ function computeNextScheduledRun(
 }
 
 function toggleTimeValue(current: string[], target: string): string[] {
+  if (!isValidTimeValue(target)) {
+    return current;
+  }
   const next = current.includes(target)
     ? current.filter((value) => value !== target)
     : [...current, target];
@@ -3858,6 +4026,10 @@ function toggleWeekdayValue(
     ? current.filter((value) => value !== target)
     : [...current, target];
   return next.sort((left, right) => left - right);
+}
+
+function isValidTimeValue(value: string): boolean {
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(value);
 }
 
 // ==================== Language Tab ====================

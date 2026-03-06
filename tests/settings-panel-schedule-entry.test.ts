@@ -47,6 +47,31 @@ describe('SettingsPanel schedule tab entry', () => {
     expect(settingsPanelContent).toContain('最近会话：{task.lastRunSessionId}');
   });
 
+  it('supports daily and weekly multi-slot schedule editing', () => {
+    expect(settingsPanelContent).toContain("const [scheduleMode, setScheduleMode] = useState<ScheduleFormMode>('once')");
+    expect(settingsPanelContent).toContain('<ScheduleSelectMenu');
+    expect(settingsPanelContent).toContain('<TimeMultiSelectMenu');
+    expect(settingsPanelContent).toContain('label="执行模式"');
+    expect(settingsPanelContent).toContain('label="执行星期"');
+    expect(settingsPanelContent).toContain('label="执行时段"');
+    expect(settingsPanelContent).toContain('每天在这些时段自动执行');
+    expect(settingsPanelContent).toContain('每周在选中的星期与时段自动执行');
+    expect(settingsPanelContent).toContain('系统将自动找到下一档执行时间');
+  });
+
+  it('allows editable custom time entries instead of fixed half-hour slots', () => {
+    expect(settingsPanelContent).toContain('可手动输入任意 HH:mm');
+    expect(settingsPanelContent).toContain('type="time"');
+    expect(settingsPanelContent).toContain('快捷建议');
+    expect(settingsPanelContent).toContain('function isValidTimeValue(value: string): boolean');
+  });
+
+  it('formats daily and weekly schedule rules from scheduleConfig', () => {
+    expect(settingsPanelContent).toContain("if (task.scheduleConfig?.kind === 'daily')");
+    expect(settingsPanelContent).toContain("if (task.scheduleConfig?.kind === 'weekly')");
+    expect(settingsPanelContent).toContain('每周 ${weekdays} · ${task.scheduleConfig.times.join(\'、\')}');
+  });
+
   it('shows clear stop semantics hint', () => {
     expect(settingsPanelContent).toContain('停用仅阻止后续自动触发，已开始执行的会话需在会话列表中手动停止');
   });
