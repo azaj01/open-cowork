@@ -273,6 +273,23 @@ describe('CodexCliEventMapper', () => {
     ]);
   });
 
+  it('ignores transcript-only agent messages that duplicate tool cards', () => {
+    const mapper = createMapper();
+
+    const messageActions = mapper.map({
+      type: 'item.completed',
+      item: {
+        id: 'msg-2',
+        type: 'agent_message',
+        text: `(no content) [Tool: mcp__Chrome__navigate_page (ID: tool_a)] Input: {"url":"https://huggingface.co/papers/date/2026-03-06"}
+
+[Tool: mcp__Chrome__navigate_page (ID: tool_b)] Input: {"url":"https://huggingface.co/papers/date/2026-03-05"}`,
+      },
+    });
+
+    expect(messageActions).toEqual([]);
+  });
+
   it('maps raw todo items helper', () => {
     expect(mapCodexTodoItems([{ text: 'A', completed: true }, { text: 'B' }])).toEqual([
       { content: 'A', status: 'completed', id: '', activeForm: '' },

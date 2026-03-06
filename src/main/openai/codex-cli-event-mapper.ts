@@ -195,7 +195,7 @@ export class CodexCliEventMapper {
       }
 
       if (itemType === 'agent_message' && status === 'completed') {
-        const text = typeof item.text === 'string' ? item.text.trim() : '';
+        const text = typeof item.text === 'string' ? sanitizeAgentMessageText(item.text) : '';
         if (text) {
           actions.push({ type: 'assistant.message', text });
         }
@@ -418,4 +418,33 @@ function parseImageBlock(block: Record<string, unknown>): { data: string; mimeTy
   const mimeType = sourceMimeType || directMimeType || 'image/png';
 
   return { data, mimeType };
+}
+
+function sanitizeAgentMessageText(text: string): string {
+  const normalized = text.trim();
+  if (!normalized) {
+    return '';
+  }
+
+  // 过滤仅由工具 transcript 组成的消息，避免与独立 tool_use/tool_result 卡片重复展示。
+  if (isTranscriptOnlyAgentMessage(normalized)) {
+    return '';
+  }
+
+  return normalized;
+}
+
+function isTranscriptOnlyAgentMessage(text: string): boolean {
+  const sections = text
+    .split(/\n(?=\s*(?:\(no content\)\s*)?\[Tool:\s+)/)
+    .map((section) => section.trim())
+    .filter(Boolean);
+
+  if (sections.length === 0) {
+    return false;
+  }
+
+  return sections.every((section) =>
+    /^(?:\(no content\)\s*)?\[Tool:\s+[^\]]+\]\s+Input:\s+[\s\S]+$/u.test(section)
+  );
 }
