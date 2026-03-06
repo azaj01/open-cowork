@@ -3,8 +3,10 @@ import { Anthropic } from '@anthropic-ai/sdk';
 import { PROVIDER_PRESETS } from './config-store';
 import {
   buildOpenAICodexHeaders,
+  normalizeAnthropicBaseUrl,
   OPENAI_CODEX_BACKEND_BASE_URL,
   resolveOpenAICredentials,
+  shouldAllowEmptyAnthropicApiKey,
   shouldUseAnthropicAuthToken,
 } from './auth-utils';
 import { importLocalAuthToken } from '../auth/local-auth';
@@ -21,6 +23,7 @@ const NETWORK_ERROR_CODES = new Set([
 
 const REQUEST_TIMEOUT_MS = 30000;
 const CODEX_USAGE_ENDPOINT = 'https://chatgpt.com/backend-api/wham/usage';
+const LOCAL_ANTHROPIC_PLACEHOLDER_KEY = 'sk-ant-local-proxy';
 
 type ApiTestError = Error & { status?: number };
 
@@ -61,11 +64,16 @@ function normalizeApiTestError(error: unknown): ApiTestResult {
 }
 
 function resolveBaseUrl(input: ApiTestInput): string | undefined {
+  const normalizeForAnthropic = (value: string | undefined): string | undefined => (
+    input.provider === 'openai' || (input.provider === 'custom' && input.customProtocol === 'openai')
+      ? value
+      : normalizeAnthropicBaseUrl(value)
+  );
   if (input.baseUrl && input.baseUrl.trim()) {
-    return input.baseUrl.trim();
+    return normalizeForAnthropic(input.baseUrl.trim());
   }
   if (input.provider !== 'custom') {
-    return PROVIDER_PRESETS[input.provider]?.baseUrl;
+    return normalizeForAnthropic(PROVIDER_PRESETS[input.provider]?.baseUrl);
   }
   return undefined;
 }
@@ -172,6 +180,11 @@ export async function testApiConnection(input: ApiTestInput): Promise<ApiTestRes
   const resolvedBaseUrl = resolveBaseUrl(input);
   const customUsesOpenAI = input.provider === 'custom' && input.customProtocol === 'openai';
   const useOpenAI = input.provider === 'openai' || customUsesOpenAI;
+  const allowEmptyAnthropicApiKey = shouldAllowEmptyAnthropicApiKey({
+    provider: input.provider,
+    customProtocol: input.customProtocol,
+    baseUrl: resolvedBaseUrl,
+  });
   const localCodex = useOpenAI ? importLocalAuthToken('codex') : null;
   const localCodexToken = localCodex?.token?.trim() || '';
   const hasLocalCodex = useOpenAI && Boolean(localCodexToken);
@@ -183,7 +196,7 @@ export async function testApiConnection(input: ApiTestInput): Promise<ApiTestRes
         baseUrl: resolvedBaseUrl,
       })
     : null;
-  const effectiveApiKey = apiKey;
+  const effectiveApiKey = apiKey || (allowEmptyAnthropicApiKey ? LOCAL_ANTHROPIC_PLACEHOLDER_KEY : '');
   const useAuthTokenHeader = shouldUseAnthropicAuthToken({
     provider: input.provider,
     customProtocol: input.customProtocol,

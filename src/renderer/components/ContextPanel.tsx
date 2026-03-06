@@ -209,7 +209,7 @@ export function ContextPanel() {
                       className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors ${canClick ? 'cursor-pointer hover:bg-surface-hover' : ''}`}
                       onClick={async () => {
                         if (!canClick) return;
-                        const revealed = await window.electronAPI.showItemInFolder(artifactPath, currentWorkingDir);
+                        const revealed = await window.electronAPI.showItemInFolder(artifactPath, currentWorkingDir ?? undefined);
                         if (!revealed) {
                           setGlobalNotice({
                             id: `artifact-reveal-failed-${Date.now()}`,

@@ -496,12 +496,7 @@ function APISettingsTab() {
             <div>
               {testResult.ok
                 ? t('api.testSuccess', { ms: typeof testResult.latencyMs === 'number' ? testResult.latencyMs : '--' })
-                : (testResult.details?.startsWith('custom_openai_official_base_unsupported:')
-                    ? (() => {
-                        const base = testResult.details.split(':').slice(1).join(':').trim();
-                        return `当前 custom/openai + ${base || '官方 OpenAI Base URL'} 在统一模式下不可用，请改为 custom/anthropic + 网关 URL 并保存后重试。`;
-                      })()
-                    : t(`api.testError.${testResult.errorType || 'unknown'}`))}
+                : t(`api.testError.${testResult.errorType || 'unknown'}`)}
             </div>
             {!testResult.ok && testResult.details && (
               <div className="mt-1 text-xs text-text-muted">{testResult.details}</div>

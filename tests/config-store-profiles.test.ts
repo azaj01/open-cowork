@@ -161,4 +161,52 @@ describe('ConfigStore provider profiles', () => {
     expect(store.hasAnyUsableCredentials()).toBe(true);
     expect(store.isConfigured()).toBe(true);
   });
+
+  it('treats local custom anthropic gateway as usable without api key', () => {
+    const store = new ConfigStore();
+
+    store.update({
+      provider: 'custom',
+      customProtocol: 'anthropic',
+      apiKey: '',
+      baseUrl: 'http://127.0.0.1:8082',
+      model: 'openai/gpt-4.1-mini',
+    });
+
+    expect(store.hasUsableCredentialsForActiveSet()).toBe(true);
+    expect(store.hasAnyUsableCredentials()).toBe(true);
+    expect(store.isConfigured()).toBe(true);
+  });
+
+  it('treats ipv6 loopback custom anthropic gateway as usable without api key', () => {
+    const store = new ConfigStore();
+
+    store.update({
+      provider: 'custom',
+      customProtocol: 'anthropic',
+      apiKey: '',
+      baseUrl: 'http://[::1]:8082',
+      model: 'openai/gpt-4.1-mini',
+    });
+
+    expect(store.hasUsableCredentialsForActiveSet()).toBe(true);
+    expect(store.hasAnyUsableCredentials()).toBe(true);
+    expect(store.isConfigured()).toBe(true);
+  });
+
+  it('keeps non-loopback custom anthropic gateway requiring api key', () => {
+    const store = new ConfigStore();
+
+    store.update({
+      provider: 'custom',
+      customProtocol: 'anthropic',
+      apiKey: '',
+      baseUrl: 'https://proxy.example.com/anthropic',
+      model: 'openai/gpt-4.1-mini',
+    });
+
+    expect(store.hasUsableCredentialsForActiveSet()).toBe(false);
+    expect(store.hasAnyUsableCredentials()).toBe(false);
+    expect(store.isConfigured()).toBe(false);
+  });
 });

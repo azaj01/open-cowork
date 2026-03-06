@@ -140,6 +140,12 @@ interface ContentBlockViewProps {
   message?: Message; // Pass the whole message to access previous messages
 }
 
+function normalizeCitationMarkdownLinks(markdown: string): string {
+  // Cowork citation guidance can emit ~[Title](url)~ markers.
+  // Render them as regular links instead of strikethrough links.
+  return markdown.replace(/~\[(.+?)\]\(([^)\s]+)\)~/g, '[$1]($2)');
+}
+
 function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: ContentBlockViewProps) {
   const { activeSessionId, sessions, workingDir } = useAppStore();
   const activeSession = activeSessionId ? sessions.find(s => s.id === activeSessionId) : null;
@@ -164,7 +170,7 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
           return;
         }
         const resolvedPath = resolveFilePath(value);
-        await window.electronAPI.showItemInFolder(resolvedPath, currentWorkingDir);
+        await window.electronAPI.showItemInFolder(resolvedPath, currentWorkingDir ?? undefined);
       }}
       className={getFileLinkButtonClassName()}
       title="在文件夹中定位"
@@ -198,7 +204,7 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
     case 'text': {
       const textBlock = block as { type: 'text'; text: string };
       const text = textBlock.text || '';
-      const normalizedText = normalizeLocalFileMarkdownLinks(text);
+      const normalizedText = normalizeCitationMarkdownLinks(normalizeLocalFileMarkdownLinks(text));
       
       if (!text) {
         return <span className="text-text-muted italic">(empty text)</span>;
@@ -217,7 +223,7 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
       return (
         <div className="prose-chat max-w-none text-text-primary">
           <ReactMarkdown
-            remarkPlugins={[remarkMath, remarkGfm]}
+            remarkPlugins={[remarkMath, [remarkGfm, { singleTilde: false }]]}
             rehypePlugins={[rehypeKatex]}
             components={{
               a({ children, href }) {
@@ -230,7 +236,7 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
                         if (typeof window === 'undefined' || !window.electronAPI?.showItemInFolder) {
                           return;
                         }
-                        await window.electronAPI.showItemInFolder(localFilePath, currentWorkingDir);
+                        await window.electronAPI.showItemInFolder(localFilePath, currentWorkingDir ?? undefined);
                       }}
                       className={getFileLinkButtonClassName()}
                       title="在文件夹中定位"
@@ -635,10 +641,11 @@ function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
   
   // Check if this question is the pending one (waiting for response)
   const isPending = pendingQuestion?.toolUseId === block.id;
-  const isAnswered = submitted || !isPending;
+  const isAnswered = submitted;
+  const isReadOnly = submitted || !isPending;
 
   const handleOptionToggle = (questionIdx: number, label: string, multiSelect: boolean) => {
-    if (isAnswered) return; // Don't allow changes after submission
+    if (isReadOnly) return; // Only allow changes while this question is pending
     
     setSelections(prev => {
       const current = prev[questionIdx] || [];
@@ -689,7 +696,7 @@ function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
         </div>
         <div>
           <span className="font-medium text-sm text-text-primary">
-            {isAnswered ? 'Questions answered' : 'Please answer to continue'}
+            {isAnswered ? 'Questions answered' : isPending ? 'Please answer to continue' : 'Question closed'}
           </span>
         </div>
         {isAnswered && (
@@ -724,9 +731,9 @@ function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
                     <button
                       key={optIdx}
                       onClick={() => handleOptionToggle(qIdx, option.label, q.multiSelect || false)}
-                      disabled={isAnswered}
+                      disabled={isReadOnly}
                       className={`w-full p-3 rounded-lg border text-left transition-all ${
-                        isAnswered
+                        isReadOnly
                           ? isSelected
                             ? 'border-accent/50 bg-accent/10 cursor-default'
                             : 'border-border-subtle bg-surface-muted cursor-default opacity-60'

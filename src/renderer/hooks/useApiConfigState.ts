@@ -10,6 +10,7 @@ import type {
   ProviderPresets,
   ProviderType,
 } from '../types';
+import { isLoopbackBaseUrl } from '../../shared/network/loopback';
 
 type LocalAuthProvider = 'codex';
 
@@ -127,6 +128,10 @@ export function profileKeyToProvider(profileKey: ProviderProfileKey): {
     return { provider: 'custom', customProtocol: 'anthropic' };
   }
   return { provider: profileKey, customProtocol: 'anthropic' };
+}
+
+export function isCustomAnthropicLoopbackGateway(baseUrl: string): boolean {
+  return isLoopbackBaseUrl(baseUrl);
 }
 
 function modelPresetForProfile(profileKey: ProviderProfileKey, presets: ProviderPresets) {
@@ -357,7 +362,10 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
   const openaiMode = currentProfile.openaiMode;
 
   const isOpenAIMode = provider === 'openai' || (provider === 'custom' && customProtocol === 'openai');
-  const requiresApiKey = !isOpenAIMode;
+  const allowEmptyApiKey = provider === 'custom'
+    && customProtocol === 'anthropic'
+    && isCustomAnthropicLoopbackGateway(baseUrl);
+  const requiresApiKey = !isOpenAIMode && !allowEmptyApiKey;
   const showsCompatibilityProbeHint = provider === 'openrouter' || (provider === 'custom' && customProtocol === 'anthropic');
 
   const currentDraftSignature = useMemo(
@@ -532,7 +540,7 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
   }, [resolveLocalAuthProvider, setApiKey]);
 
   const handleTest = useCallback(async () => {
-    if (!isOpenAIMode && !apiKey.trim()) {
+    if (requiresApiKey && !apiKey.trim()) {
       setError(t('api.testError.missing_key'));
       return;
     }
@@ -560,6 +568,10 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
         useLiveRequest: useLiveTest,
       });
       setTestResult(result);
+      if (result.ok && hasUnsavedChanges) {
+        setSuccessMessage(t('api.testSuccessNeedSave', { defaultValue: '连接测试成功，请点击“保存设置”后再开始会话。' }));
+        setTimeout(() => setSuccessMessage(''), 2500);
+      }
     } catch (testError) {
       setTestResult({
         ok: false,
@@ -575,16 +587,17 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
     currentPreset.baseUrl,
     customModel,
     customProtocol,
-    isOpenAIMode,
     model,
     provider,
+    requiresApiKey,
+    hasUnsavedChanges,
     t,
     useCustomModel,
     useLiveTest,
   ]);
 
   const handleSave = useCallback(async (options?: { silentSuccess?: boolean }) => {
-    if (!isOpenAIMode && !apiKey.trim()) {
+    if (requiresApiKey && !apiKey.trim()) {
       setError(t('api.testError.missing_key'));
       return false;
     }
@@ -654,6 +667,7 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
     presets,
     profiles,
     provider,
+    requiresApiKey,
     t,
     useCustomModel,
   ]);

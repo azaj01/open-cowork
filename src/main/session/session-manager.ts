@@ -568,8 +568,6 @@ export class SessionManager {
       // Get existing messages for context (including the one we just saved)
       const existingMessages = this.getMessages(session.id);
 
-      void this.runSessionTitleGeneration(session, prompt, existingMessages);
-
       // Run the agent - this handles everything including sending messages
       // Use enhanced prompt that includes file information
       try {
@@ -585,6 +583,9 @@ export class SessionManager {
           throw runnerError;
         }
       }
+
+      // 标题生成不再与首轮对话并发，避免与主请求竞争同一上游配额/通道导致体感变慢。
+      void this.runSessionTitleGeneration(session, prompt, existingMessages);
     } catch (error) {
       logError('[SessionManager] Error processing prompt:', error);
       const errorText = error instanceof Error ? error.message : 'Unknown error';
@@ -710,24 +711,15 @@ export class SessionManager {
         currentTitle: session.title,
         hasAttempted: this.sessionTitleAttempts.has(session.id),
         generateTitle: async (titlePrompt) => {
-          for (let attempt = 1; attempt <= 2; attempt += 1) {
-            if (shouldAbort()) {
-              return null;
-            }
-            const title = await this.withTimeout(
-              this.generateTitleWithConfig(titlePrompt, session.cwd),
-              TITLE_GENERATION_TIMEOUT_MS,
-              session.id
-            );
-            const normalizedTitle = normalizeGeneratedTitle(title);
-            if (normalizedTitle) {
-              return normalizedTitle;
-            }
-            if (attempt === 1) {
-              log('[SessionTitle] Empty title from generator, retrying once', session.id);
-            }
+          if (shouldAbort()) {
+            return null;
           }
-          return null;
+          const title = await this.withTimeout(
+            this.generateTitleWithConfig(titlePrompt, session.cwd),
+            TITLE_GENERATION_TIMEOUT_MS,
+            session.id
+          );
+          return normalizeGeneratedTitle(title);
         },
         getLatestTitle: () => this.db.sessions.get(session.id)?.title ?? null,
         markAttempt: () => {

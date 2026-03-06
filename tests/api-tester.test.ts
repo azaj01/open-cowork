@@ -110,6 +110,66 @@ describe('testApiConnection', () => {
     expect(mocks.anthropicModelsList).not.toHaveBeenCalled();
   });
 
+  it('normalizes trailing /v1 from custom anthropic base url to avoid /v1/v1/messages', async () => {
+    const result = await testApiConnection({
+      provider: 'custom',
+      customProtocol: 'anthropic',
+      apiKey: 'sk-test',
+      baseUrl: 'https://api.duckcoding.ai/v1',
+      model: 'gpt-5.3-codex',
+      useLiveRequest: false,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mocks.anthropicCtor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: 'sk-test',
+        baseURL: 'https://api.duckcoding.ai',
+        timeout: 30000,
+      }),
+    );
+  });
+
+  it('allows empty api key for local custom anthropic gateway by injecting placeholder', async () => {
+    const result = await testApiConnection({
+      provider: 'custom',
+      customProtocol: 'anthropic',
+      apiKey: '',
+      baseUrl: 'http://127.0.0.1:8082',
+      model: 'openai/gpt-4.1-mini',
+      useLiveRequest: false,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mocks.anthropicCtor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: 'sk-ant-local-proxy',
+        baseURL: 'http://127.0.0.1:8082',
+        timeout: 30000,
+      }),
+    );
+    expect(mocks.anthropicMessagesCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows empty api key for ipv6 loopback custom anthropic gateway', async () => {
+    const result = await testApiConnection({
+      provider: 'custom',
+      customProtocol: 'anthropic',
+      apiKey: '',
+      baseUrl: 'http://[::1]:8082',
+      model: 'openai/gpt-4.1-mini',
+      useLiveRequest: false,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mocks.anthropicCtor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: 'sk-ant-local-proxy',
+        baseURL: 'http://[::1]:8082',
+      }),
+    );
+  });
+
   it('keeps models.list check for direct anthropic when not live request', async () => {
     const result = await testApiConnection({
       provider: 'anthropic',

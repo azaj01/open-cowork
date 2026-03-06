@@ -15,18 +15,18 @@ export interface OpenAIFailoverDecision {
 
 export interface OpenAIFailoverInput {
   error: unknown;
-  hasApiKey: boolean;
+  hasOpenAICredentials: boolean;
   alreadyUsingResponsesFallback: boolean;
   hasTurnOutput: boolean;
   hasTurnSideEffects: boolean;
 }
 
 export function decideOpenAIFailoverFromCodex(input: OpenAIFailoverInput): OpenAIFailoverDecision {
-  if (!input.hasApiKey) {
+  if (!input.hasOpenAICredentials) {
     return {
       shouldFailover: false,
       category: 'non-codex-error',
-      reason: 'No API key configured for Responses fallback.',
+      reason: 'No usable OpenAI credentials configured for Responses fallback.',
     };
   }
 

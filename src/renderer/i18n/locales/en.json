@@ -116,6 +116,10 @@
       "rate_limited": "Rate limited or quota exceeded",
       "server_error": "Service error. Please try again later",
       "network_error": "Network error. Check your connection",
+      "proxy_boot_failed": "Local proxy failed to start. Please check your runtime environment",
+      "proxy_health_failed": "Local proxy health check failed. Please try again",
+      "proxy_upstream_auth_failed": "Upstream authentication failed. Please verify your API key",
+      "proxy_upstream_not_found": "Upstream URL or route was not found. Please verify your Base URL",
       "unknown": "Connection failed"
     },
     "newSet": "New Set",

@@ -16,6 +16,7 @@ vi.mock('../src/main/mcp/mcp-config-store', () => ({
 
 import type { ServerEvent, Session } from '../src/renderer/types';
 import { configStore } from '../src/main/config/config-store';
+import * as authUtils from '../src/main/config/auth-utils';
 import { CodexCliRunner } from '../src/main/openai/codex-cli-runner';
 
 function createSession(id: string): Session {
@@ -63,6 +64,39 @@ describe('CodexCliRunner failure context and cancellation semantics', () => {
       hasTurnOutput: false,
       hasTurnSideEffects: false,
     });
+  });
+
+  it('does not pre-report final error when fallback credentials are available via local codex', async () => {
+    const events: ServerEvent[] = [];
+    const runner = new CodexCliRunner({
+      sendToRenderer: (event) => events.push(event),
+    });
+    configStore.set('apiKey', '');
+    vi.spyOn(authUtils, 'resolveOpenAICredentials').mockReturnValue({
+      apiKey: 'oauth-local-token',
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      useCodexOAuth: true,
+      source: 'localCodex',
+    });
+    (runner as any).executeCodexProcess = vi.fn().mockRejectedValue(new Error('Codex CLI exited with code 1'));
+
+    let thrown: any;
+    try {
+      await runner.run(createSession('ctx-local-codex'), 'simple prompt', []);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeTruthy();
+    expect(thrown.alreadyReportedToUser).toBe(false);
+    const errorMessages = events.filter(
+      (event) =>
+        event.type === 'stream.message'
+        && event.payload.message.content.some(
+          (block) => block.type === 'text' && block.text.includes('**Error**:')
+        )
+    );
+    expect(errorMessages.length).toBe(0);
   });
 
   it('attaches side-effect context when turn already emitted tool output before failure', async () => {

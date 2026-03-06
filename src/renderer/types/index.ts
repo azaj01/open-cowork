@@ -486,6 +486,10 @@ export interface ApiTestResult {
     | 'rate_limited'
     | 'server_error'
     | 'network_error'
+    | 'proxy_boot_failed'
+    | 'proxy_health_failed'
+    | 'proxy_upstream_auth_failed'
+    | 'proxy_upstream_not_found'
     | 'unknown';
   details?: string;
 }

@@ -3,7 +3,7 @@ import { decideOpenAIFailoverFromCodex } from '../src/main/session/openai-failov
 
 describe('decideOpenAIFailoverFromCodex', () => {
   const baseInput = {
-    hasApiKey: true,
+    hasOpenAICredentials: true,
     alreadyUsingResponsesFallback: false,
     hasTurnOutput: false,
     hasTurnSideEffects: false,
@@ -58,7 +58,7 @@ describe('decideOpenAIFailoverFromCodex', () => {
     const decision = decideOpenAIFailoverFromCodex({
       ...baseInput,
       error: new Error('Codex CLI exited with code 1'),
-      hasApiKey: false,
+      hasOpenAICredentials: false,
     });
     expect(decision.shouldFailover).toBe(false);
   });

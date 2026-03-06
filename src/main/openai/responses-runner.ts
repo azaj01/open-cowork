@@ -346,7 +346,14 @@ export class OpenAIResponsesRunner {
   private mcpManager?: MCPManager;
   private alwaysAllowTools: Set<string> = new Set();
   private todoBySession: Map<string, TodoItem[]> = new Map();
-  private pendingQuestions: Map<string, (answer: string) => void> = new Map();
+  private pendingQuestions: Map<
+    string,
+    {
+      sessionId: string;
+      resolve: (answer: string) => void;
+      reject: (error: Error) => void;
+    }
+  > = new Map();
   private requestPermission?: (
     sessionId: string,
     toolUseId: string,
@@ -502,6 +509,7 @@ export class OpenAIResponsesRunner {
       });
     } finally {
       this.activeControllers.delete(session.id);
+      this.cancelPendingQuestionsForSession(session.id);
       if (this.pathResolver) {
         this.pathResolver.unregisterSession(session.id);
       }
@@ -511,16 +519,33 @@ export class OpenAIResponsesRunner {
   cancel(sessionId: string): void {
     const controller = this.activeControllers.get(sessionId);
     if (controller) controller.abort();
+    this.cancelPendingQuestionsForSession(sessionId);
   }
 
   handleQuestionResponse(questionId: string, answer: string): void {
-    const resolver = this.pendingQuestions.get(questionId);
-    if (resolver) {
-      resolver(answer);
+    const pending = this.pendingQuestions.get(questionId);
+    if (pending) {
+      pending.resolve(answer);
       this.pendingQuestions.delete(questionId);
       return;
     }
     log('[OpenAIResponsesRunner] Question response ignored:', questionId);
+  }
+
+  private createAbortError(message: string): Error {
+    const error = new Error(message);
+    error.name = 'AbortError';
+    return error;
+  }
+
+  private cancelPendingQuestionsForSession(sessionId: string): void {
+    for (const [questionId, pending] of this.pendingQuestions.entries()) {
+      if (pending.sessionId !== sessionId) {
+        continue;
+      }
+      pending.reject(this.createAbortError('Question request cancelled'));
+      this.pendingQuestions.delete(questionId);
+    }
   }
 
   private getApiMode(): 'responses' | 'chat' {
@@ -1451,8 +1476,8 @@ export class OpenAIResponsesRunner {
 
   private async requestUserQuestion(sessionId: string, toolUseId: string, questions: QuestionItem[]): Promise<string> {
     const questionId = uuidv4();
-    return new Promise((resolve) => {
-      this.pendingQuestions.set(questionId, resolve);
+    return new Promise((resolve, reject) => {
+      this.pendingQuestions.set(questionId, { sessionId, resolve, reject });
       this.sendToRenderer({
         type: 'question.request',
         payload: {

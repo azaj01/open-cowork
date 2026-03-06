@@ -104,6 +104,14 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
         return t('api.testError.server_error');
       case 'network_error':
         return t('api.testError.network_error');
+      case 'proxy_boot_failed':
+        return t('api.testError.proxy_boot_failed');
+      case 'proxy_health_failed':
+        return t('api.testError.proxy_health_failed');
+      case 'proxy_upstream_auth_failed':
+        return t('api.testError.proxy_upstream_auth_failed');
+      case 'proxy_upstream_not_found':
+        return t('api.testError.proxy_upstream_not_found');
       default:
         return t('api.testError.unknown');
     }
@@ -342,13 +350,6 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
             </div>
           )}
 
-          {/* Success Message */}
-          {successMessage && (
-            <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-success/10 text-success text-sm">
-              <CheckCircle className="w-4 h-4 flex-shrink-0" />
-              {successMessage}
-            </div>
-          )}
           {testResult && (
             <div className={`flex gap-2 px-4 py-3 rounded-xl text-sm ${testResult.ok ? 'bg-success/10 text-success' : 'bg-error/10 text-error'}`}>
               {testResult.ok ? (
@@ -372,6 +373,12 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
 
         {/* Footer */}
         <div className="px-6 py-4 bg-surface-hover border-t border-border">
+          {successMessage && (
+            <div className="mb-3 flex items-center gap-2 px-4 py-3 rounded-xl bg-success/10 text-success text-sm">
+              <CheckCircle className="w-4 h-4 flex-shrink-0" />
+              {successMessage}
+            </div>
+          )}
           <div className="flex items-start gap-2 text-xs text-text-muted mb-3">
             <input
               type="checkbox"

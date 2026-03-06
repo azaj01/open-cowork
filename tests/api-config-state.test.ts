@@ -3,6 +3,7 @@ import type { AppConfig } from '../src/renderer/types';
 import {
   FALLBACK_PROVIDER_PRESETS,
   buildApiConfigSnapshot,
+  isCustomAnthropicLoopbackGateway,
   profileKeyFromProvider,
   profileKeyToProvider,
 } from '../src/renderer/hooks/useApiConfigState';
@@ -74,5 +75,13 @@ describe('api config state helpers', () => {
     expect(snapshot.profiles.openai.apiKey).toBe('sk-openai');
     expect(snapshot.profiles.openrouter.baseUrl).toBe(FALLBACK_PROVIDER_PRESETS.openrouter.baseUrl);
     expect(snapshot.profiles['custom:anthropic'].model).toBe(FALLBACK_PROVIDER_PRESETS.custom.models[0]?.id);
+  });
+
+  it('detects local custom anthropic loopback gateway url', () => {
+    expect(isCustomAnthropicLoopbackGateway('http://127.0.0.1:8082')).toBe(true);
+    expect(isCustomAnthropicLoopbackGateway('http://localhost:8082')).toBe(true);
+    expect(isCustomAnthropicLoopbackGateway('http://[::1]:8082')).toBe(true);
+    expect(isCustomAnthropicLoopbackGateway('http://0.0.0.0:8082')).toBe(true);
+    expect(isCustomAnthropicLoopbackGateway('https://proxy.example.com')).toBe(false);
   });
 });

@@ -15,15 +15,41 @@ const MAX_LOG_FILES = 5; // Keep last 5 log files
 // Developer logs enabled flag (can be toggled by user)
 let devLogsEnabled = true;
 
+function resolveUserDataPath(): string {
+  try {
+    if (app && typeof app.getPath === 'function') {
+      const userDataPath = app.getPath('userData');
+      if (userDataPath?.trim()) {
+        return userDataPath;
+      }
+    }
+  } catch {
+    // Fallback to local path when Electron app context is unavailable
+  }
+
+  return path.join(process.cwd(), '.cowork-user-data');
+}
+
+function resolveAppVersion(): string {
+  try {
+    if (app && typeof app.getVersion === 'function') {
+      return app.getVersion();
+    }
+  } catch {
+    // ignore and return fallback
+  }
+  return 'unknown';
+}
+
 /**
  * Initialize log file
  */
 function initLogFile(): void {
-  if (logFilePath) return; // Already initialized
+  if (logFilePath && logStream) return; // Already initialized and writable
 
   try {
     // Create logs directory in userData
-    const userDataPath = app.getPath('userData');
+    const userDataPath = resolveUserDataPath();
     const logsDir = path.join(userDataPath, 'logs');
     
     if (!fs.existsSync(logsDir)) {
@@ -46,7 +72,7 @@ Platform: ${process.platform}
 Arch: ${process.arch}
 Node: ${process.version}
 Electron: ${process.versions.electron}
-App Version: ${app.getVersion()}
+App Version: ${resolveAppVersion()}
 ================================================================================
 
 `;
@@ -77,12 +103,20 @@ function cleanupOldLogs(logsDir: string): void {
 
     // Delete old files
     if (files.length > MAX_LOG_FILES) {
-      const filesToDelete = files.slice(MAX_LOG_FILES);
+      const activeLogFilePath = logFilePath;
+      const filesToDelete = files
+        .slice(MAX_LOG_FILES)
+        .filter((file) => !activeLogFilePath || file.path !== activeLogFilePath);
       for (const file of filesToDelete) {
         try {
           fs.unlinkSync(file.path);
           console.log(`[Logger] Deleted old log file: ${file.name}`);
         } catch (err) {
+          const errno = err as NodeJS.ErrnoException;
+          if (errno.code === 'ENOENT') {
+            // File already removed by another process/test; ignore.
+            continue;
+          }
           console.error(`[Logger] Failed to delete log file ${file.name}:`, err);
         }
       }
@@ -112,14 +146,63 @@ function rotateLogIfNeeded(): void {
       initLogFile();
     }
   } catch (error) {
+    const errno = error as NodeJS.ErrnoException;
+    if (errno.code === 'ENOENT') {
+      // Current log file was removed unexpectedly; recreate a fresh file.
+      logFilePath = null;
+      logStream = null;
+      initLogFile();
+      return;
+    }
     console.error('[Logger] Failed to rotate log file:', error);
   }
+}
+
+function serializeLogArg(arg: unknown, seen = new Set<unknown>()): string {
+  if (arg instanceof Error) {
+    if (seen.has(arg)) {
+      return '[Circular Error]';
+    }
+    seen.add(arg);
+    const err = arg as Error & { cause?: unknown };
+    const lines: string[] = [];
+    lines.push(`${err.name}: ${err.message}`);
+    if (err.stack) {
+      lines.push(err.stack);
+    }
+    if (err.cause !== undefined) {
+      lines.push(`Cause: ${serializeLogArg(err.cause, seen)}`);
+    }
+
+    const extraEntries = Object.entries(err as unknown as Record<string, unknown>).filter(
+      ([key]) => !['name', 'message', 'stack', 'cause'].includes(key)
+    );
+    if (extraEntries.length > 0) {
+      const extras = Object.fromEntries(extraEntries);
+      lines.push(`Meta: ${serializeLogArg(extras, seen)}`);
+    }
+    return lines.join('\n');
+  }
+
+  if (typeof arg === 'object' && arg !== null) {
+    if (seen.has(arg)) {
+      return '[Circular Object]';
+    }
+    seen.add(arg);
+    try {
+      return JSON.stringify(arg, null, 2);
+    } catch {
+      return String(arg);
+    }
+  }
+
+  return String(arg);
 }
 
 /**
  * Write to log file
  */
-function writeToFile(level: string, ...args: any[]): void {
+function writeToFile(level: string, ...args: unknown[]): void {
   // Skip if dev logs are disabled
   if (!devLogsEnabled) {
     return;
@@ -132,16 +215,7 @@ function writeToFile(level: string, ...args: any[]): void {
   if (logStream) {
     try {
       const timestamp = getTimestamp();
-      const message = args.map(arg => {
-        if (typeof arg === 'object') {
-          try {
-            return JSON.stringify(arg, null, 2);
-          } catch {
-            return String(arg);
-          }
-        }
-        return String(arg);
-      }).join(' ');
+      const message = args.map((arg) => serializeLogArg(arg)).join(' ');
 
       logStream.write(`[${timestamp}] [${level}] ${message}\n`);
 
@@ -160,17 +234,17 @@ function getTimestamp(): string {
   return now.toISOString().replace('T', ' ').replace('Z', '');
 }
 
-export function log(...args: any[]): void {
+export function log(...args: unknown[]): void {
   console.log(`[${getTimestamp()}]`, ...args);
   writeToFile('INFO', ...args);
 }
 
-export function logWarn(...args: any[]): void {
+export function logWarn(...args: unknown[]): void {
   console.warn(`[${getTimestamp()}]`, ...args);
   writeToFile('WARN', ...args);
 }
 
-export function logError(...args: any[]): void {
+export function logError(...args: unknown[]): void {
   console.error(`[${getTimestamp()}]`, ...args);
   writeToFile('ERROR', ...args);
 }
@@ -189,7 +263,7 @@ export function getLogFilePath(): string | null {
  * Get logs directory path
  */
 export function getLogsDirectory(): string {
-  const userDataPath = app.getPath('userData');
+  const userDataPath = resolveUserDataPath();
   return path.join(userDataPath, 'logs');
 }
 
@@ -262,4 +336,5 @@ export function closeLogFile(): void {
       console.error('[Logger] Failed to close log file:', error);
     }
   }
+  logFilePath = null;
 }

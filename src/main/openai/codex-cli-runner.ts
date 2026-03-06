@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Message, ServerEvent, Session, TraceStep } from '../../renderer/types';
 import type { MCPManager } from '../mcp/mcp-manager';
 import { configStore } from '../config/config-store';
+import { resolveOpenAICredentials } from '../config/auth-utils';
 import { buildCodexMcpOverrides } from '../mcp/codex-mcp-overrides';
 import { extractArtifactsFromText, buildArtifactTraceSteps } from '../utils/artifact-parser';
 import { buildOpenAICoworkInstructions } from '../utils/cowork-instructions';
@@ -234,7 +235,12 @@ export class CodexCliRunner {
         this.emitTodoWriteWidget(session.id, failed);
       }
 
-      const likelyFailoverPossible = Boolean(configStore.get('apiKey')?.trim());
+      const likelyFailoverPossible = Boolean(resolveOpenAICredentials({
+        provider: configStore.get('provider'),
+        customProtocol: configStore.get('customProtocol'),
+        apiKey: configStore.get('apiKey'),
+        baseUrl: configStore.get('baseUrl'),
+      })?.apiKey);
       let alreadyReportedToUser = false;
       if (!likelyFailoverPossible) {
         this.sendMessage(session.id, {

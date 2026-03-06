@@ -1,7 +1,14 @@
 import fs from 'node:fs';
 import Store from 'electron-store';
 import { log } from '../utils/logger';
-import { isOpenAIProvider, resolveOpenAICredentials, shouldUseAnthropicAuthToken } from './auth-utils';
+import { isKnownInvalidClaudeCodePath } from '../claude/claude-code-path';
+import {
+  isOpenAIProvider,
+  normalizeAnthropicBaseUrl,
+  resolveOpenAICredentials,
+  shouldAllowEmptyAnthropicApiKey,
+  shouldUseAnthropicAuthToken,
+} from './auth-utils';
 
 /**
  * Application configuration schema
@@ -84,6 +91,7 @@ export interface AppConfig {
 
 const DEFAULT_CONFIG_SET_ID = 'default';
 const MAX_CONFIG_SET_COUNT = 20;
+const LOCAL_ANTHROPIC_PLACEHOLDER_KEY = 'sk-ant-local-proxy';
 
 const defaultProfiles: Record<ProviderProfileKey, ProviderProfile> = {
   openrouter: {
@@ -894,7 +902,7 @@ export class ConfigStore {
       ? this.cloneConfigSet(nextConfigSets[targetIndex])
       : this.cloneConfigSet(nextConfigSets[0]);
 
-    let nextProfiles = this.cloneProfiles(targetSet.profiles);
+    const nextProfiles = this.cloneProfiles(targetSet.profiles);
     let nextActiveProfileKey = targetSet.activeProfileKey;
     let nextProvider = targetSet.provider;
     let nextCustomProtocol: CustomProtocolType = targetSet.customProtocol === 'openai' ? 'openai' : 'anthropic';
@@ -1000,6 +1008,13 @@ export class ConfigStore {
     if (apiKey) {
       return true;
     }
+    if (shouldAllowEmptyAnthropicApiKey({
+      provider: projection.provider,
+      customProtocol: projection.customProtocol,
+      baseUrl: projection.baseUrl,
+    })) {
+      return true;
+    }
     const protocol: CustomProtocolType = projection.customProtocol === 'openai' ? 'openai' : 'anthropic';
     if (!isOpenAIProvider({ provider: projection.provider, customProtocol: protocol })) {
       return false;
@@ -1007,7 +1022,7 @@ export class ConfigStore {
     return resolveOpenAICredentials({
       provider: projection.provider,
       customProtocol: protocol,
-      apiKey: projection.apiKey,
+      apiKey: projection.apiKey ?? '',
       baseUrl: projection.baseUrl,
     }) !== null;
   }
@@ -1077,6 +1092,8 @@ export class ConfigStore {
     delete process.env.OPENAI_API_MODE;
     delete process.env.OPENAI_ACCOUNT_ID;
     delete process.env.OPENAI_CODEX_OAUTH;
+    delete process.env.CLAUDE_CODE_PATH;
+    delete process.env.COWORK_WORKDIR;
 
     const useOpenAI =
       projectedConfig.provider === 'openai' ||
@@ -1098,19 +1115,25 @@ export class ConfigStore {
       if (projectedConfig.model) {
         process.env.OPENAI_MODEL = projectedConfig.model;
       }
-      process.env.OPENAI_API_MODE = 'responses';
+      process.env.OPENAI_API_MODE = projectedConfig.openaiMode === 'chat' ? 'chat' : 'responses';
     } else {
+      const effectiveAnthropicApiKey = projectedConfig.apiKey?.trim() || (
+        shouldAllowEmptyAnthropicApiKey(projectedConfig)
+          ? LOCAL_ANTHROPIC_PLACEHOLDER_KEY
+          : ''
+      );
       if (projectedConfig.provider === 'anthropic' || (projectedConfig.provider === 'custom' && projectedConfig.customProtocol !== 'openai')) {
-        const useAuthToken = shouldUseAnthropicAuthToken(projectedConfig);
-        if (projectedConfig.apiKey) {
+        const useAuthToken = shouldUseAnthropicAuthToken({ ...projectedConfig, apiKey: effectiveAnthropicApiKey });
+        if (effectiveAnthropicApiKey) {
           if (useAuthToken) {
-            process.env.ANTHROPIC_AUTH_TOKEN = projectedConfig.apiKey;
+            process.env.ANTHROPIC_AUTH_TOKEN = effectiveAnthropicApiKey;
           } else {
-            process.env.ANTHROPIC_API_KEY = projectedConfig.apiKey;
+            process.env.ANTHROPIC_API_KEY = effectiveAnthropicApiKey;
           }
         }
-        if (projectedConfig.baseUrl) {
-          process.env.ANTHROPIC_BASE_URL = projectedConfig.baseUrl;
+        const normalizedAnthropicBaseUrl = normalizeAnthropicBaseUrl(projectedConfig.baseUrl);
+        if (normalizedAnthropicBaseUrl) {
+          process.env.ANTHROPIC_BASE_URL = normalizedAnthropicBaseUrl;
         }
         if (useAuthToken) {
           delete process.env.ANTHROPIC_API_KEY;
@@ -1119,11 +1142,12 @@ export class ConfigStore {
         }
       } else {
         // OpenRouter: use ANTHROPIC_AUTH_TOKEN for proxy authentication
-        if (projectedConfig.apiKey) {
-          process.env.ANTHROPIC_AUTH_TOKEN = projectedConfig.apiKey;
+        if (effectiveAnthropicApiKey) {
+          process.env.ANTHROPIC_AUTH_TOKEN = effectiveAnthropicApiKey;
         }
-        if (projectedConfig.baseUrl) {
-          process.env.ANTHROPIC_BASE_URL = projectedConfig.baseUrl;
+        const normalizedAnthropicBaseUrl = normalizeAnthropicBaseUrl(projectedConfig.baseUrl);
+        if (normalizedAnthropicBaseUrl) {
+          process.env.ANTHROPIC_BASE_URL = normalizedAnthropicBaseUrl;
         }
         // ANTHROPIC_API_KEY must be empty to prevent SDK from using it
         process.env.ANTHROPIC_API_KEY = '';
@@ -1138,7 +1162,9 @@ export class ConfigStore {
     // Only set CLAUDE_CODE_PATH if the configured path actually exists
     // This allows auto-detection to work when the configured path is invalid
     if (projectedConfig.claudeCodePath) {
-      if (fs.existsSync(projectedConfig.claudeCodePath)) {
+      if (isKnownInvalidClaudeCodePath(projectedConfig.claudeCodePath)) {
+        log('[Config] Ignoring invalid Claude Code path pattern, will use auto-detection:', projectedConfig.claudeCodePath);
+      } else if (fs.existsSync(projectedConfig.claudeCodePath)) {
         process.env.CLAUDE_CODE_PATH = projectedConfig.claudeCodePath;
         log('[Config] Using configured Claude Code path:', projectedConfig.claudeCodePath);
       } else {

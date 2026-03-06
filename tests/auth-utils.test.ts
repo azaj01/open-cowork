@@ -10,9 +10,14 @@ vi.mock('../src/main/auth/local-auth', () => ({
 
 import {
   buildOpenAICodexHeaders,
+  getUnifiedUnsupportedCustomOpenAIBaseUrl,
+  isOfficialOpenAIBaseUrl,
+  isLoopbackBaseUrl,
   isLikelyOAuthAccessToken,
+  normalizeAnthropicBaseUrl,
   resolveOpenAICredentials,
   sanitizeOpenAIAccountId,
+  shouldAllowEmptyAnthropicApiKey,
   shouldUseAnthropicAuthToken,
 } from '../src/main/config/auth-utils';
 
@@ -119,5 +124,72 @@ describe('auth-utils', () => {
     expect(sanitizeOpenAIAccountId('user@example.com')).toBeUndefined();
     expect(sanitizeOpenAIAccountId('abc')).toBeUndefined();
     expect(sanitizeOpenAIAccountId('acct_123456')).toBe('acct_123456');
+  });
+
+  it('detects loopback gateway urls', () => {
+    expect(isLoopbackBaseUrl('http://127.0.0.1:8082')).toBe(true);
+    expect(isLoopbackBaseUrl('http://localhost:8082')).toBe(true);
+    expect(isLoopbackBaseUrl('http://[::1]:8082')).toBe(true);
+    expect(isLoopbackBaseUrl('http://0.0.0.0:8082')).toBe(true);
+    expect(isLoopbackBaseUrl('https://api.example.com')).toBe(false);
+  });
+
+  it('normalizes anthropic base urls by removing a trailing /v1 segment', () => {
+    expect(normalizeAnthropicBaseUrl('https://api.duckcoding.ai/v1')).toBe('https://api.duckcoding.ai');
+    expect(normalizeAnthropicBaseUrl('https://proxy.example.com/anthropic/v1/')).toBe('https://proxy.example.com/anthropic');
+    expect(normalizeAnthropicBaseUrl('https://proxy.example.com/anthropic')).toBe('https://proxy.example.com/anthropic');
+  });
+
+  it('detects official openai base urls', () => {
+    expect(isOfficialOpenAIBaseUrl('https://api.openai.com/v1')).toBe(true);
+    expect(isOfficialOpenAIBaseUrl('https://chatgpt.com/backend-api/codex')).toBe(true);
+    expect(isOfficialOpenAIBaseUrl('https://api.duckcoding.ai/v1')).toBe(false);
+    expect(isOfficialOpenAIBaseUrl('https://proxy.example.com/openai')).toBe(false);
+  });
+
+  it('flags unsupported custom/openai + official openai base in unified sdk path', () => {
+    expect(
+      getUnifiedUnsupportedCustomOpenAIBaseUrl({
+        provider: 'custom',
+        customProtocol: 'openai',
+        apiKey: 'sk-test-123',
+        baseUrl: 'https://api.openai.com/v1',
+      })
+    ).toBe('https://api.openai.com/v1');
+
+    expect(
+      getUnifiedUnsupportedCustomOpenAIBaseUrl({
+        provider: 'custom',
+        customProtocol: 'openai',
+        apiKey: 'sk-test-123',
+        baseUrl: 'https://api.duckcoding.ai/v1',
+      })
+    ).toBeNull();
+  });
+
+  it('allows empty anthropic api key only for custom anthropic loopback gateway', () => {
+    expect(
+      shouldAllowEmptyAnthropicApiKey({
+        provider: 'custom',
+        customProtocol: 'anthropic',
+        baseUrl: 'http://[::1]:8082',
+      })
+    ).toBe(true);
+
+    expect(
+      shouldAllowEmptyAnthropicApiKey({
+        provider: 'custom',
+        customProtocol: 'anthropic',
+        baseUrl: 'https://proxy.example.com',
+      })
+    ).toBe(false);
+
+    expect(
+      shouldAllowEmptyAnthropicApiKey({
+        provider: 'anthropic',
+        customProtocol: 'anthropic',
+        baseUrl: 'http://127.0.0.1:8082',
+      })
+    ).toBe(false);
   });
 });

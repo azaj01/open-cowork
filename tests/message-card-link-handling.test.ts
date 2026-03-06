@@ -10,7 +10,7 @@ describe('MessageCard local link handling', () => {
 
     expect(source).toContain('const localFilePath = resolveLocalFilePathFromHref(href, currentWorkingDir);');
     expect(source).toContain('title="在文件夹中定位"');
-    expect(source).toContain('await window.electronAPI.showItemInFolder(localFilePath, currentWorkingDir);');
+    expect(source).toContain('await window.electronAPI.showItemInFolder(localFilePath, currentWorkingDir ?? undefined);');
     expect(source).not.toContain('const fallbackUrl = `file://${encodeURI(localFilePath)}`;');
     expect(source).not.toContain('target="_blank"');
   });

@@ -30,6 +30,7 @@ import {
 } from './schedule/scheduled-task-manager';
 import { createScheduledTaskStore } from './schedule/scheduled-task-store';
 import { getClaudeUnifiedModeState, isClaudeUnifiedModeEnabled } from './session/claude-unified-mode';
+import { claudeProxyManager } from './proxy/claude-proxy-manager';
 import {
   buildScheduledTaskFallbackTitle,
   buildScheduledTaskTitle,
@@ -578,6 +579,14 @@ app.whenReady().then(async () => {
 
   // Initialize session manager
   sessionManager = new SessionManager(db, sendToRenderer, pluginRuntimeService);
+  if (isClaudeUnifiedModeEnabled() && process.env.COWORK_DISABLE_CLAUDE_PROXY !== '1') {
+    try {
+      await claudeProxyManager.warmupForConfig(configStore.getAll());
+      log('[ClaudeProxy] Warmup complete during app startup');
+    } catch (error) {
+      logWarn('[ClaudeProxy] Startup warmup failed; it will retry on demand', error);
+    }
+  }
 
   const scheduledTaskStore = createScheduledTaskStore(db);
   scheduledTaskManager = new ScheduledTaskManager({
@@ -687,6 +696,13 @@ async function cleanupSandboxResources(): Promise<void> {
     log('[App] Sandbox shutdown complete');
   } catch (error) {
     logError('[App] Error shutting down sandbox:', error);
+  }
+
+  try {
+    await claudeProxyManager.stop();
+    log('[App] Claude proxy shutdown complete');
+  } catch (error) {
+    logError('[App] Error shutting down Claude proxy:', error);
   }
 }
 
@@ -915,7 +931,7 @@ ipcMain.handle('config.getPresets', () => {
   return PROVIDER_PRESETS;
 });
 
-const syncConfigAfterMutation = () => {
+const syncConfigAfterMutation = async () => {
   // Mark as configured if any config set has usable credentials
   configStore.set('isConfigured', configStore.hasAnyUsableCredentials());
 
@@ -926,6 +942,14 @@ const syncConfigAfterMutation = () => {
   if (sessionManager) {
     sessionManager.reloadConfig();
     log('[Config] Session manager config reloaded');
+  }
+
+  if (isClaudeUnifiedModeEnabled() && process.env.COWORK_DISABLE_CLAUDE_PROXY !== '1') {
+    try {
+      await claudeProxyManager.warmupForConfig(configStore.getAll());
+    } catch (error) {
+      logWarn('[ClaudeProxy] Warmup after config mutation failed', error);
+    }
   }
 
   // Notify renderer of config update
@@ -942,41 +966,41 @@ const syncConfigAfterMutation = () => {
   return updatedConfig;
 };
 
-ipcMain.handle('config.save', (_event, newConfig: Partial<AppConfig>) => {
+ipcMain.handle('config.save', async (_event, newConfig: Partial<AppConfig>) => {
   log('[Config] Saving config:', { ...newConfig, apiKey: newConfig.apiKey ? '***' : '' });
 
   // Update config
   configStore.update(newConfig);
-  const updatedConfig = syncConfigAfterMutation();
+  const updatedConfig = await syncConfigAfterMutation();
 
   return { success: true, config: updatedConfig };
 });
 
-ipcMain.handle('config.createSet', (_event, payload: CreateConfigSetPayload) => {
+ipcMain.handle('config.createSet', async (_event, payload: CreateConfigSetPayload) => {
   log('[Config] Creating config set:', payload);
   configStore.createSet(payload);
-  const updatedConfig = syncConfigAfterMutation();
+  const updatedConfig = await syncConfigAfterMutation();
   return { success: true, config: updatedConfig };
 });
 
-ipcMain.handle('config.renameSet', (_event, payload: { id: string; name: string }) => {
+ipcMain.handle('config.renameSet', async (_event, payload: { id: string; name: string }) => {
   log('[Config] Renaming config set:', payload);
   configStore.renameSet(payload);
-  const updatedConfig = syncConfigAfterMutation();
+  const updatedConfig = await syncConfigAfterMutation();
   return { success: true, config: updatedConfig };
 });
 
-ipcMain.handle('config.deleteSet', (_event, payload: { id: string }) => {
+ipcMain.handle('config.deleteSet', async (_event, payload: { id: string }) => {
   log('[Config] Deleting config set:', payload);
   configStore.deleteSet(payload);
-  const updatedConfig = syncConfigAfterMutation();
+  const updatedConfig = await syncConfigAfterMutation();
   return { success: true, config: updatedConfig };
 });
 
-ipcMain.handle('config.switchSet', (_event, payload: { id: string }) => {
+ipcMain.handle('config.switchSet', async (_event, payload: { id: string }) => {
   log('[Config] Switching config set:', payload);
   configStore.switchSet(payload);
-  const updatedConfig = syncConfigAfterMutation();
+  const updatedConfig = await syncConfigAfterMutation();
   return { success: true, config: updatedConfig };
 });
 
