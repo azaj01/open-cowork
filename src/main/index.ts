@@ -581,12 +581,15 @@ app.whenReady().then(async () => {
   // Initialize session manager
   sessionManager = new SessionManager(db, sendToRenderer, pluginRuntimeService);
   if (shouldUseUnifiedClaudeProxy(configStore.getAll())) {
+    sendToRenderer({ type: 'proxy.warmup', payload: { status: 'warming' } });
     void claudeProxyManager.warmupForConfig(configStore.getAll())
       .then(() => {
         log('[ClaudeProxy] Warmup complete during app startup');
+        sendToRenderer({ type: 'proxy.warmup', payload: { status: 'ready' } });
       })
       .catch((error) => {
         logWarn('[ClaudeProxy] Startup warmup failed; it will retry on demand', error);
+        sendToRenderer({ type: 'proxy.warmup', payload: { status: 'failed' } });
       });
   }
 
@@ -949,9 +952,15 @@ const syncConfigAfterMutation = async () => {
   }
 
   if (shouldUseUnifiedClaudeProxy(configStore.getAll())) {
-    void claudeProxyManager.warmupForConfig(configStore.getAll()).catch((error) => {
-      logWarn('[ClaudeProxy] Warmup after config mutation failed', error);
-    });
+    sendToRenderer({ type: 'proxy.warmup', payload: { status: 'warming' } });
+    void claudeProxyManager.warmupForConfig(configStore.getAll())
+      .then(() => {
+        sendToRenderer({ type: 'proxy.warmup', payload: { status: 'ready' } });
+      })
+      .catch((error) => {
+        logWarn('[ClaudeProxy] Warmup after config mutation failed', error);
+        sendToRenderer({ type: 'proxy.warmup', payload: { status: 'failed' } });
+      });
   }
 
   // Notify renderer of config update

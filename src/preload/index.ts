@@ -172,7 +172,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ): Promise<{ success: boolean; path: string; migratedCount: number; skippedCount: number; error?: string }> =>
       ipcRenderer.invoke('skills.setStoragePath', targetPath, migrate),
     openStoragePath: (): Promise<{ success: boolean; path: string; error?: string }> =>
-      ipcRenderer.invoke('skills.openStoragePath'),: (installableOnly = false): Promise<PluginCatalogItem[]> =>
+      ipcRenderer.invoke('skills.openStoragePath'),
+    listPlugins: (installableOnly = false): Promise<PluginCatalogItem[]> =>
       ipcRenderer.invoke('skills.listPlugins', installableOnly),
     installPlugin: (pluginName: string): Promise<PluginInstallResult> =>
       ipcRenderer.invoke('skills.installPlugin', pluginName),

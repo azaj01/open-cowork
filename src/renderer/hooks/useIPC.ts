@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useAppStore } from '../store';
 import type { ClientEvent, ServerEvent, PermissionResult, Session, Message, TraceStep, ContentBlock } from '../types';
+import i18n from '../i18n/config';
 
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
@@ -137,6 +138,21 @@ export function useIPC() {
         case 'workdir.changed':
           console.log('[useIPC] workdir.changed received:', event.payload.path);
           store.setWorkingDir(event.payload.path || null);
+          break;
+
+        case 'proxy.warmup':
+          if (event.payload.status === 'warming') {
+            store.setGlobalNotice({
+              id: 'proxy-warmup',
+              type: 'info',
+              message: i18n.t('api.proxyWarming'),
+            });
+          } else {
+            const current = useAppStore.getState().globalNotice;
+            if (current?.id === 'proxy-warmup') {
+              store.clearGlobalNotice();
+            }
+          }
           break;
 
         case 'error':

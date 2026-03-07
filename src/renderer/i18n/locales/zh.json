@@ -101,6 +101,7 @@
     "getStarted": "开始使用",
     "saveSettings": "保存设置",
     "openSettingsAction": "打开 API 设置",
+    "proxyWarming": "正在初始化服务，首次启动可能需要几秒...",
     "testConnection": "测试连接",
     "testingConnection": "测试中...",
     "liveTest": "真实请求验证",

@@ -86,8 +86,7 @@ export function ContextPanel() {
       }
     };
     loadMCPServers();
-    // Refresh every 5 seconds
-    const interval = setInterval(loadMCPServers, 5000);
+    const interval = setInterval(loadMCPServers, 30000);
     return () => clearInterval(interval);
   }, [getMCPServers]);
 

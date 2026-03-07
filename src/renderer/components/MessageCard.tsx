@@ -1,4 +1,4 @@
-import { useState, isValidElement, cloneElement } from 'react';
+import { useState, isValidElement, cloneElement, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -39,7 +39,7 @@ interface MessageCardProps {
   isStreaming?: boolean;
 }
 
-export function MessageCard({ message, isStreaming }: MessageCardProps) {
+export const MessageCard = memo(function MessageCard({ message, isStreaming }: MessageCardProps) {
   const isUser = message.role === 'user';
   const isQueued = message.localStatus === 'queued';
   const isCancelled = message.localStatus === 'cancelled';
@@ -130,7 +130,7 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
       )}
     </div>
   );
-}
+});
 
 interface ContentBlockViewProps {
   block: ContentBlock;

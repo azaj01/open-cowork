@@ -388,6 +388,7 @@ export type ServerEvent =
   | { type: 'skills.storageChanged'; payload: SkillsStorageChangeEvent }
   | { type: 'plugins.runtimeApplied'; payload: { sessionId: string; plugins: Array<{ name: string; path: string }> } }
   | { type: 'workdir.changed'; payload: { path: string } }
+  | { type: 'proxy.warmup'; payload: { status: 'warming' | 'ready' | 'failed' } }
   | { type: 'error'; payload: { message: string; code?: 'CONFIG_REQUIRED_ACTIVE_SET'; action?: 'open_api_settings' } };
 
 // Settings types

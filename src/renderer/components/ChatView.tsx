@@ -189,7 +189,7 @@ export function ChatView() {
     return () => {
       resizeObserver.disconnect();
     };
-  }, [displayedMessages]); // Re-create observer when messages change to ensure we're observing the right element
+  }, [displayedMessages.length]); // Re-create observer when message count changes
 
   // Cleanup scroll timeouts on unmount
   useEffect(() => {

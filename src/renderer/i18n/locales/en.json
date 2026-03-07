@@ -101,6 +101,7 @@
     "getStarted": "Get Started",
     "saveSettings": "Save Settings",
     "openSettingsAction": "Open API Settings",
+    "proxyWarming": "Initializing service, first launch may take a moment...",
     "testConnection": "Test Connection",
     "testingConnection": "Testing...",
     "liveTest": "Live request verification",
