@@ -32,6 +32,7 @@ interface AppState {
   sidebarCollapsed: boolean;
   contextPanelCollapsed: boolean;
   showSettings: boolean;
+  settingsTab: string | null;
   
   // Permission
   pendingPermission: PermissionRequest | null;
@@ -87,6 +88,7 @@ interface AppState {
   toggleSidebar: () => void;
   toggleContextPanel: () => void;
   setShowSettings: (show: boolean) => void;
+  setSettingsTab: (tab: string | null) => void;
 
   setPendingPermission: (permission: PermissionRequest | null) => void;
   setPendingQuestion: (question: UserQuestionRequest | null) => void;
@@ -155,6 +157,7 @@ export const useAppStore = create<AppState>((set) => ({
   sidebarCollapsed: false,
   contextPanelCollapsed: false,
   showSettings: false,
+  settingsTab: null,
   pendingPermission: null,
   pendingQuestion: null,
   settings: defaultSettings,
@@ -424,6 +427,7 @@ export const useAppStore = create<AppState>((set) => ({
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
   toggleContextPanel: () => set((state) => ({ contextPanelCollapsed: !state.contextPanelCollapsed })),
   setShowSettings: (show) => set({ showSettings: show }),
+  setSettingsTab: (tab) => set({ settingsTab: tab }),
 
   // Permission actions
   setPendingPermission: (permission) => set({ pendingPermission: permission }),
@@ -457,3 +461,15 @@ export const useAppStore = create<AppState>((set) => ({
   setSkillsStorageChangedAt: (timestamp) => set({ skillsStorageChangedAt: timestamp }),
   setSkillsStorageChangeEvent: (event) => set({ skillsStorageChangeEvent: event }),
 }));
+
+// Expose read-only snapshot for nav-server /status endpoint
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__getNavStatus = () => {
+    const s = useAppStore.getState();
+    return {
+      showSettings: !!s.showSettings,
+      activeSessionId: s.activeSessionId || null,
+      sessionCount: (s.sessions || []).length,
+    };
+  };
+}

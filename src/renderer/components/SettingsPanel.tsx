@@ -111,11 +111,31 @@ const SCHEDULE_MODE_OPTIONS: Array<{ value: ScheduleFormMode; label: string }> =
 
 // ==================== Main Component ====================
 
+const VALID_TABS = new Set<TabId>(['api', 'sandbox', 'credentials', 'connectors', 'skills', 'schedule', 'remote', 'logs', 'language']);
+
 export function SettingsPanel({ onClose, initialTab = 'api' }: SettingsPanelProps) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<TabId>(initialTab);
+  // Read settingsTab from store at mount time so external navigation (nav-server)
+  // takes effect even before this component mounts.
+  const storeTab = useAppStore((s) => s.settingsTab);
+  const setSettingsTab = useAppStore((s) => s.setSettingsTab);
+  const resolvedInitial = (storeTab && VALID_TABS.has(storeTab as TabId)) ? storeTab as TabId : initialTab;
+
+  const [activeTab, setActiveTab] = useState<TabId>(resolvedInitial);
   // Track which tabs have been viewed at least once (for lazy loading)
-  const [viewedTabs, setViewedTabs] = useState<Set<TabId>>(new Set([initialTab]));
+  const [viewedTabs, setViewedTabs] = useState<Set<TabId>>(new Set([resolvedInitial]));
+
+  // Consume the store signal after reading it
+  useEffect(() => {
+    if (storeTab) setSettingsTab(null);
+  }, [storeTab, setSettingsTab]);
+
+  // Support external tab driving while already mounted
+  useEffect(() => {
+    if (storeTab && VALID_TABS.has(storeTab as TabId)) {
+      setActiveTab(storeTab as TabId);
+    }
+  }, [storeTab]);
 
   // Mark tab as viewed when it becomes active
   useEffect(() => {
