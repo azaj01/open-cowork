@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Key, Plug, Settings, ChevronRight, AlertCircle, Eye, EyeOff, Plus, Trash2, Edit3, Save, Mail, Globe, Lock, Server, Cpu, Loader2, Power, PowerOff, CheckCircle, Check, ChevronDown, Package, Shield, Wifi, FolderOpen, RefreshCw, Clock3 } from 'lucide-react';
 import { useWindowSize } from '../hooks/useWindowSize';
@@ -53,6 +53,31 @@ interface MCPServerStatus {
   name: string;
   connected: boolean;
   toolCount: number;
+}
+
+type CredentialDraft = Omit<UserCredential, 'id' | 'createdAt' | 'updatedAt'>;
+
+interface ModelOptionItem {
+  id: string;
+  name: string;
+}
+
+interface MCPToolInfo {
+  serverId: string;
+  name: string;
+  description?: string;
+}
+
+interface MCPPreset {
+  name: string;
+  type: 'stdio' | 'sse';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  requiresEnv?: string[];
+  envDescription?: Record<string, string>;
 }
 
 interface SettingsPanelProps {
@@ -296,6 +321,30 @@ export function SettingsPanel({ onClose, initialTab = 'api' }: SettingsPanelProp
   );
 }
 
+function SettingsContentSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-[1.6rem] border border-border-subtle bg-background/42 px-4 py-4 space-y-3">
+      <div className="space-y-1">
+        <h4 className="text-sm font-semibold text-text-primary">{title}</h4>
+        {description && (
+          <p className="text-xs leading-5 text-text-muted">{description}</p>
+        )}
+      </div>
+      <div className="space-y-3">
+        {children}
+      </div>
+    </section>
+  );
+}
+
 // ==================== API Settings Tab (Full version from ConfigModal) ====================
 
 function APISettingsTab() {
@@ -383,11 +432,14 @@ function APISettingsTab() {
       />
 
       {/* Provider Selection */}
-      <div className="space-y-2">
+      <div className="space-y-2 rounded-[1.5rem] border border-border-subtle bg-background/40 px-4 py-4">
         <label className="flex items-center gap-2 text-sm font-medium text-text-primary">
           <Server className="w-4 h-4" />
           {t('api.provider')}
         </label>
+        <p className="text-xs leading-5 text-text-muted">
+          Choose the provider family and the broad protocol style for this workspace.
+        </p>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
           {(['openrouter', 'anthropic', 'openai', 'gemini', 'custom'] as const).map((p) => (
             <button
@@ -407,11 +459,14 @@ function APISettingsTab() {
       </div>
 
       {/* API Key */}
-      <div className="space-y-2">
+      <div className="space-y-2 rounded-[1.5rem] border border-border-subtle bg-background/40 px-4 py-4">
         <label className="flex items-center gap-2 text-sm font-medium text-text-primary">
           <Key className="w-4 h-4" />
           {t('api.apiKey')}
         </label>
+        <p className="text-xs leading-5 text-text-muted">
+          Saved locally and scoped to the active configuration set.
+        </p>
         <input
           type="password"
           value={apiKey}
@@ -426,7 +481,7 @@ function APISettingsTab() {
 
       {/* Custom Protocol */}
       {provider === 'custom' && (
-        <div className="space-y-2">
+        <div className="space-y-2 rounded-[1.5rem] border border-border-subtle bg-background/40 px-4 py-4">
           <label className="flex items-center gap-2 text-sm font-medium text-text-primary">
             <Server className="w-4 h-4" />
             {t('api.protocol')}
@@ -456,7 +511,7 @@ function APISettingsTab() {
 
       {/* Base URL - Only for custom provider */}
       {provider === 'custom' && (
-        <div className="space-y-2">
+        <div className="space-y-2 rounded-[1.5rem] border border-border-subtle bg-background/40 px-4 py-4">
           <label className="flex items-center gap-2 text-sm font-medium text-text-primary">
             <Server className="w-4 h-4" />
             {t('api.baseUrl')}
@@ -485,7 +540,7 @@ function APISettingsTab() {
       )}
 
       {/* Model Selection */}
-      <div className="space-y-2">
+      <div className="space-y-3 rounded-[1.5rem] border border-border-subtle bg-background/40 px-4 py-4">
         <div className="flex items-center justify-between">
           <label className="flex items-center gap-2 text-sm font-medium text-text-primary">
             <Cpu className="w-4 h-4" />
@@ -518,7 +573,7 @@ function APISettingsTab() {
             onChange={(e) => setModel(e.target.value)}
             className="w-full px-4 py-3 rounded-xl bg-background border border-border text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all appearance-none cursor-pointer"
           >
-            {modelOptions.map((m: any) => (
+            {(modelOptions as ModelOptionItem[]).map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
               </option>
@@ -533,7 +588,7 @@ function APISettingsTab() {
       </div>
 
       {/* Enable Thinking Mode */}
-      <div className="space-y-2">
+      <div className="space-y-2 rounded-[1.5rem] border border-border-subtle bg-background/40 px-4 py-4">
         <div className="flex items-start gap-2 text-xs text-text-muted">
           <input
             type="checkbox"
@@ -583,55 +638,57 @@ function APISettingsTab() {
       )}
 
       {/* Save Button */}
-      <div className="flex items-start gap-2 text-xs text-text-muted">
-        <input
-          type="checkbox"
-          id="api-live-test"
-          checked={useLiveTest}
-          onChange={(e) => setUseLiveTest(e.target.checked)}
-          className="mt-0.5 w-4 h-4 rounded border-border text-accent focus:ring-accent"
-        />
-        <label htmlFor="api-live-test" className="space-y-0.5">
-          <div className="text-text-primary">{t('api.liveTest')}</div>
-          <div>{t('api.liveTestHint')}</div>
-        </label>
-      </div>
+      <div className="space-y-3 rounded-[1.5rem] border border-border-subtle bg-background/40 px-4 py-4">
+        <div className="flex items-start gap-2 text-xs text-text-muted">
+          <input
+            type="checkbox"
+            id="api-live-test"
+            checked={useLiveTest}
+            onChange={(e) => setUseLiveTest(e.target.checked)}
+            className="mt-0.5 w-4 h-4 rounded border-border text-accent focus:ring-accent"
+          />
+          <label htmlFor="api-live-test" className="space-y-0.5">
+            <div className="text-text-primary">{t('api.liveTest')}</div>
+            <div>{t('api.liveTestHint')}</div>
+          </label>
+        </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          onClick={handleTest}
-          disabled={isTesting || (requiresApiKey && !apiKey.trim())}
-          className="w-full py-3 px-4 rounded-xl border border-border bg-surface-hover text-text-primary font-medium hover:bg-surface-active disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-[0.98] flex items-center justify-center gap-2"
-        >
-          {isTesting ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {t('api.testingConnection')}
-            </>
-          ) : (
-            <>
-              <Plug className="w-4 h-4" />
-              {t('api.testConnection')}
-            </>
-          )}
-        </button>
-        <button
-          onClick={() => { void handleSave(); }}
-          disabled={isSaving || (requiresApiKey && !apiKey.trim())}
-          className="w-full py-3 px-4 rounded-xl bg-accent text-white font-medium hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-[0.98] flex items-center justify-center gap-2"
-        >
-          {isSaving ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {t('common.saving')}
-            </>
-          ) : (
-            <>
-              <CheckCircle className="w-4 h-4" />
-              {t('api.saveSettings')}
-            </>
-          )}
-        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={handleTest}
+            disabled={isTesting || (requiresApiKey && !apiKey.trim())}
+            className="w-full py-3 px-4 rounded-xl border border-border bg-surface-hover text-text-primary font-medium hover:bg-surface-active disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-[0.98] flex items-center justify-center gap-2"
+          >
+            {isTesting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {t('api.testingConnection')}
+              </>
+            ) : (
+              <>
+                <Plug className="w-4 h-4" />
+                {t('api.testConnection')}
+              </>
+            )}
+          </button>
+          <button
+            onClick={() => { void handleSave(); }}
+            disabled={isSaving || (requiresApiKey && !apiKey.trim())}
+            className="w-full py-3 px-4 rounded-xl bg-accent text-white font-medium hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-[0.98] flex items-center justify-center gap-2"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {t('common.saving')}
+              </>
+            ) : (
+              <>
+                <CheckCircle className="w-4 h-4" />
+                {t('api.saveSettings')}
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1232,13 +1289,7 @@ function CredentialsTab() {
   const [showForm, setShowForm] = useState(false);
   const [editingCredential, setEditingCredential] = useState<UserCredential | null>(null);
 
-  useEffect(() => {
-    if (isElectron) {
-      loadCredentials();
-    }
-  }, []);
-
-  async function loadCredentials() {
+  const loadCredentials = useCallback(async () => {
     try {
       const loaded = await window.electronAPI.credentials.getAll();
       setCredentials(loaded || []);
@@ -1247,9 +1298,15 @@ function CredentialsTab() {
       console.error('Failed to load credentials:', err);
       setError(t('credentials.failedToLoad'));
     }
-  }
+  }, [t]);
 
-  async function handleSave(credential: Omit<UserCredential, 'id' | 'createdAt' | 'updatedAt'>) {
+  useEffect(() => {
+    if (isElectron) {
+      void loadCredentials();
+    }
+  }, [loadCredentials]);
+
+  async function handleSave(credential: CredentialDraft) {
     if (!isElectron) return;
     setIsLoading(true);
     setError('');
@@ -1303,26 +1360,31 @@ function CredentialsTab() {
 
       {/* Form */}
       {showForm && (
-        <CredentialForm
-          credential={editingCredential || undefined}
-          onSave={handleSave}
-          onCancel={() => { setShowForm(false); setEditingCredential(null); }}
-          isLoading={isLoading}
-        />
+        <div className="rounded-[1.5rem] border border-border-subtle bg-background/40 px-4 py-4">
+          <CredentialForm
+            credential={editingCredential || undefined}
+            onSave={handleSave}
+            onCancel={() => { setShowForm(false); setEditingCredential(null); }}
+            isLoading={isLoading}
+          />
+        </div>
       )}
 
       {/* List */}
       {!showForm && (
-        <div className="space-y-2">
+        <SettingsContentSection
+          title={t('credentials.title')}
+          description={t('credentials.addCredential')}
+        >
           {credentials.length === 0 ? (
-            <div className="text-center py-8 text-text-muted">
+            <div className="rounded-[1.5rem] border border-border-subtle bg-background/40 text-center py-8 text-text-muted">
               <Key className="w-10 h-10 mx-auto mb-3 opacity-50" />
               <p>{t('credentials.noCredentials')}</p>
               <p className="text-sm mt-1">{t('credentials.addCredential')}</p>
             </div>
           ) : (
             credentials.map((cred) => (
-              <div key={cred.id} className="rounded-xl border border-border bg-surface p-4">
+              <div key={cred.id} className="rounded-[1.5rem] border border-border-subtle bg-background/40 p-4">
                 <div className="flex items-start justify-between">
                   <div className="flex items-start gap-3">
                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
@@ -1368,14 +1430,14 @@ function CredentialsTab() {
               </div>
             ))
           )}
-        </div>
+        </SettingsContentSection>
       )}
 
       {/* Add Button */}
       {!showForm && (
         <button
           onClick={() => setShowForm(true)}
-          className="w-full py-3 px-4 rounded-xl border-2 border-dashed border-border hover:border-accent hover:bg-accent/5 transition-all flex items-center justify-center gap-2 text-text-secondary hover:text-accent"
+          className="w-full py-3 px-4 rounded-[1.4rem] border-2 border-dashed border-border-subtle hover:border-accent hover:bg-accent/5 transition-all flex items-center justify-center gap-2 text-text-secondary hover:text-accent"
         >
           <Plus className="w-5 h-5" />
           {t('credentials.addNewCredential')}
@@ -1387,7 +1449,7 @@ function CredentialsTab() {
 
 function CredentialForm({ credential, onSave, onCancel, isLoading }: {
   credential?: UserCredential;
-  onSave: (c: any) => void;
+  onSave: (c: CredentialDraft) => void;
   onCancel: () => void;
   isLoading: boolean;
 }) {
@@ -1424,7 +1486,7 @@ function CredentialForm({ credential, onSave, onCancel, isLoading }: {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-xl border border-border bg-surface p-4 space-y-4">
+    <form onSubmit={handleSubmit} className="rounded-[1.4rem] border border-border-subtle bg-background/55 p-4 space-y-4">
       <h3 className="font-medium text-text-primary">
         {credential ? t('credentials.editCredential') : t('credentials.addNewCredential')}
       </h3>
@@ -1445,7 +1507,7 @@ function CredentialForm({ credential, onSave, onCancel, isLoading }: {
           <label className="block text-sm font-medium text-text-primary mb-2">{t('credentials.type')}</label>
           <select
             value={type}
-            onChange={(e) => setType(e.target.value as any)}
+            onChange={(e) => setType(e.target.value as UserCredential['type'])}
             className="w-full px-4 py-2 rounded-lg bg-background border border-border text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30"
           >
             <option value="email">Email</option>
@@ -1555,69 +1617,70 @@ function ConnectorsTab() {
   const { t } = useTranslation();
   const [servers, setServers] = useState<MCPServerConfig[]>([]);
   const [statuses, setStatuses] = useState<MCPServerStatus[]>([]);
-  const [tools, setTools] = useState<any[]>([]);
+  const [tools, setTools] = useState<MCPToolInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [editingServer, setEditingServer] = useState<MCPServerConfig | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [presets, setPresets] = useState<Record<string, any>>({});
+  const [presets, setPresets] = useState<Record<string, MCPPreset>>({});
   const [showPresets, setShowPresets] = useState(true);
-  const [configuringPreset, setConfiguringPreset] = useState<{ key: string; preset: any } | null>(null);
+  const [configuringPreset, setConfiguringPreset] = useState<{ key: string; preset: MCPPreset } | null>(null);
   const [presetEnvValues, setPresetEnvValues] = useState<Record<string, string>>({});
 
   // Auto-refresh
-  useEffect(() => {
-    if (isElectron) {
-      loadAll();
-      const interval = setInterval(() => {
-        loadTools();
-        loadStatuses();
-      }, 3000);
-      return () => clearInterval(interval);
-    }
-  }, []);
-
-  async function loadAll() {
-    await Promise.all([loadServers(), loadStatuses(), loadTools(), loadPresets()]);
-  }
-
-  async function loadPresets() {
+  const loadPresets = useCallback(async () => {
     try {
-      const loaded = await window.electronAPI.mcp.getPresets();
+      const loaded = await window.electronAPI.mcp.getPresets() as Record<string, MCPPreset>;
       setPresets(loaded || {});
     } catch (err) {
       console.error('Failed to load presets:', err);
     }
-  }
+  }, []);
 
-  async function loadServers() {
+  const loadServers = useCallback(async () => {
     try {
-      const loaded = await window.electronAPI.mcp.getServers();
+      const loaded = await window.electronAPI.mcp.getServers() as MCPServerConfig[];
       setServers(loaded || []);
       setError('');
     } catch (err) {
       console.error('Failed to load servers:', err);
       setError('Failed to load servers');
     }
-  }
+  }, []);
 
-  async function loadStatuses() {
+  const loadStatuses = useCallback(async () => {
     try {
-      const loaded = await window.electronAPI.mcp.getServerStatus();
+      const loaded = await window.electronAPI.mcp.getServerStatus() as MCPServerStatus[];
       setStatuses(loaded || []);
     } catch (err) {
       console.error('Failed to load statuses:', err);
     }
-  }
+  }, []);
 
-  async function loadTools() {
+  const loadTools = useCallback(async () => {
     try {
-      const loaded = await window.electronAPI.mcp.getTools();
+      const loaded = await window.electronAPI.mcp.getTools() as MCPToolInfo[];
       setTools(loaded || []);
     } catch (err) {
       console.error('Failed to load tools:', err);
     }
-  }
+  }, []);
+
+  const loadAll = useCallback(async () => {
+    await Promise.all([loadServers(), loadStatuses(), loadTools(), loadPresets()]);
+  }, [loadPresets, loadServers, loadStatuses, loadTools]);
+
+  useEffect(() => {
+    if (!isElectron) {
+      return;
+    }
+    void loadAll();
+    const interval = setInterval(() => {
+      void loadTools();
+      void loadStatuses();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [loadAll, loadStatuses, loadTools]);
 
   async function handleAddPreset(presetKey: string) {
     const preset = presets[presetKey];
@@ -1645,7 +1708,7 @@ function ConnectorsTab() {
     await addPresetServer(presetKey, preset, {});
   }
 
-  async function addPresetServer(presetKey: string, preset: any, envOverrides: Record<string, string>) {
+  async function addPresetServer(presetKey: string, preset: MCPPreset, envOverrides: Record<string, string>) {
     const serverConfig: MCPServerConfig = {
       id: `mcp-${presetKey}-${Date.now()}`,
       name: preset.name,
@@ -1730,7 +1793,7 @@ function ConnectorsTab() {
       {!showAddForm && !editingServer && (
         <div className="space-y-3">
           {servers.length === 0 ? (
-            <div className="text-center py-8 text-text-muted">
+            <div className="rounded-[1.5rem] border border-border-subtle bg-background/40 text-center py-8 text-text-muted">
               <Plug className="w-10 h-10 mx-auto mb-3 opacity-50" />
               <p>{t('mcp.noConnectors')}</p>
               <p className="text-sm mt-1">{t('mcp.addConnector')}</p>
@@ -1760,7 +1823,7 @@ function ConnectorsTab() {
 
       {/* Preset Environment Configuration Modal */}
       {configuringPreset && (
-        <div className="p-4 rounded-xl border border-accent/30 bg-accent/5 space-y-4">
+        <div className="p-4 rounded-[1.5rem] border border-accent/30 bg-accent/5 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium text-text-primary">
               {t('mcp.configure')} {configuringPreset.preset.name}
@@ -1913,7 +1976,7 @@ function ServerCard({
   server: MCPServerConfig;
   status?: MCPServerStatus;
   toolCount: number;
-  tools: any[];
+  tools: MCPToolInfo[];
   onEdit: () => void;
   onDelete: () => void;
   onToggleEnabled: () => void;
@@ -2413,34 +2476,6 @@ function SkillsTab() {
   }
 
   useEffect(() => {
-    if (isElectron) {
-      void loadSkills();
-    }
-
-    let refreshTimer: ReturnType<typeof setInterval> | null = null;
-    if (isElectron) {
-      refreshTimer = setInterval(() => {
-        void loadSkills(true);
-      }, 5000);
-    }
-
-    return () => {
-      if (pluginToastTimerRef.current) {
-        clearTimeout(pluginToastTimerRef.current);
-      }
-      if (refreshTimer) {
-        clearInterval(refreshTimer);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (isElectron && skillsStorageChangedAt > 0) {
-      void loadSkills(true);
-    }
-  }, [skillsStorageChangedAt]);
-
-  useEffect(() => {
     if (!skillsStorageChangeEvent) {
       return;
     }
@@ -2468,7 +2503,7 @@ function SkillsTab() {
     }, 5000);
   }
 
-  async function loadSkills(silent = false) {
+  const loadSkills = useCallback(async (silent = false) => {
     try {
       const [loaded, nextStoragePath] = await Promise.all([
         window.electronAPI.skills.getAll(),
@@ -2485,7 +2520,35 @@ function SkillsTab() {
         setError(t('skills.failedToLoad'));
       }
     }
-  }
+  }, [t]);
+
+  useEffect(() => {
+    if (isElectron) {
+      void loadSkills();
+    }
+
+    let refreshTimer: ReturnType<typeof setInterval> | null = null;
+    if (isElectron) {
+      refreshTimer = setInterval(() => {
+        void loadSkills(true);
+      }, 5000);
+    }
+
+    return () => {
+      if (pluginToastTimerRef.current) {
+        clearTimeout(pluginToastTimerRef.current);
+      }
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+      }
+    };
+  }, [loadSkills]);
+
+  useEffect(() => {
+    if (isElectron && skillsStorageChangedAt > 0) {
+      void loadSkills(true);
+    }
+  }, [loadSkills, skillsStorageChangedAt]);
 
   async function loadPlugins() {
     try {
@@ -2723,8 +2786,10 @@ function SkillsTab() {
         </div>
       )}
 
-      <div className="p-4 rounded-xl bg-surface border border-border space-y-3">
-        <div className="text-sm font-medium text-text-primary">{t('skills.storagePathTitle')}</div>
+      <SettingsContentSection
+        title={t('skills.storagePathTitle')}
+        description={t('skills.storagePathHint')}
+      >
         <div className="text-xs text-text-muted break-all">
           {storagePath || t('skills.storagePathUnavailable')}
         </div>
@@ -2754,11 +2819,13 @@ function SkillsTab() {
             {t('skills.refreshSkills')}
           </button>
         </div>
-      </div>
+      </SettingsContentSection>
 
       {/* Built-in Skills */}
-      <div className="space-y-2">
-        <h3 className="text-sm font-medium text-text-primary px-2">{t('skills.builtinSkills')}</h3>
+      <SettingsContentSection
+        title={t('skills.builtinSkills')}
+        description={t('skills.builtinSkillsDesc')}
+      >
         {builtinSkills.map(skill => (
           <SkillCard
             key={skill.id}
@@ -2768,11 +2835,13 @@ function SkillsTab() {
             isLoading={isLoading}
           />
         ))}
-      </div>
+      </SettingsContentSection>
 
       {/* Custom Skills */}
-      <div className="space-y-2">
-        <h3 className="text-sm font-medium text-text-primary px-2">{t('skills.customSkills')}</h3>
+      <SettingsContentSection
+        title={t('skills.customSkills')}
+        description={t('skills.installSkillsDesc')}
+      >
         {customSkills.length === 0 ? (
           <div className="text-center py-8 text-text-muted">
             <Package className="w-10 h-10 mx-auto mb-3 opacity-50" />
@@ -2790,13 +2859,17 @@ function SkillsTab() {
             />
           ))
         )}
-      </div>
+      </SettingsContentSection>
 
+      <SettingsContentSection
+        title={t('skills.pluginsTitle')}
+        description={t('skills.pluginsDesc')}
+      >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         <button
           onClick={handleBrowsePlugins}
           disabled={isLoading || isPluginLoading}
-          className="w-full py-3 px-4 rounded-xl border border-border hover:border-accent hover:bg-accent/5 transition-all flex items-center justify-center gap-2 text-text-secondary hover:text-accent disabled:opacity-50"
+          className="w-full py-3 px-4 rounded-[1.4rem] border border-border-subtle hover:border-accent hover:bg-accent/5 transition-all flex items-center justify-center gap-2 text-text-secondary hover:text-accent disabled:opacity-50"
         >
           {isPluginLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Package className="w-5 h-5" />}
           {t('skills.browsePlugins')}
@@ -2804,12 +2877,13 @@ function SkillsTab() {
         <button
           onClick={handleInstall}
           disabled={isLoading}
-          className="w-full py-3 px-4 rounded-xl border-2 border-dashed border-border hover:border-accent hover:bg-accent/5 transition-all flex items-center justify-center gap-2 text-text-secondary hover:text-accent disabled:opacity-50"
+          className="w-full py-3 px-4 rounded-[1.4rem] border-2 border-dashed border-border-subtle hover:border-accent hover:bg-accent/5 transition-all flex items-center justify-center gap-2 text-text-secondary hover:text-accent disabled:opacity-50"
         >
           <Plus className="w-5 h-5" />
           {t('skills.installSkillFromFolder')}
         </button>
       </div>
+      </SettingsContentSection>
 
       {isPluginModalOpen && (
         <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
@@ -4161,21 +4235,7 @@ function LogsTab() {
   const [logsDirectory, setLogsDirectory] = useState('');
   const [devLogsEnabled, setDevLogsEnabled] = useState(true);
 
-  useEffect(() => {
-    if (isElectron) {
-      loadLogs();
-      loadDevLogsStatus();
-      
-      // Auto-refresh logs every 3 seconds
-      const interval = setInterval(() => {
-        loadLogs();
-      }, 3000);
-      
-      return () => clearInterval(interval);
-    }
-  }, []);
-
-  async function loadLogs() {
+  const loadLogs = useCallback(async () => {
     try {
       const [files, dir] = await Promise.all([
         window.electronAPI.logs.getAll(),
@@ -4188,9 +4248,9 @@ function LogsTab() {
       console.error('Failed to load logs:', err);
       setError(t('logs.exportFailed'));
     }
-  }
+  }, [t]);
 
-  async function loadDevLogsStatus() {
+  const loadDevLogsStatus = useCallback(async () => {
     try {
       const result = await window.electronAPI.logs.isEnabled();
       if (result.success && typeof result.enabled === 'boolean') {
@@ -4199,7 +4259,19 @@ function LogsTab() {
     } catch (err) {
       console.error('Failed to load dev logs status:', err);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (!isElectron) {
+      return;
+    }
+    void loadLogs();
+    void loadDevLogsStatus();
+    const interval = setInterval(() => {
+      void loadLogs();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [loadDevLogsStatus, loadLogs]);
 
   async function handleToggleDevLogs() {
     setIsLoading(true);
@@ -4306,16 +4378,16 @@ function LogsTab() {
       )}
 
       {/* Developer Logs Toggle */}
-      <div className="p-4 rounded-xl bg-surface border border-border">
-        <div className="flex items-center justify-between">
-          <div className="flex-1">
-            <h3 className="text-sm font-medium text-text-primary mb-1">{t('logs.enableDevLogs')}</h3>
-            <p className="text-xs text-text-muted">{t('logs.enableDevLogsDesc')}</p>
+      <section className="rounded-[1.6rem] border border-border-subtle bg-background/42 px-4 py-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h4 className="text-sm font-semibold text-text-primary">{t('logs.enableDevLogs')}</h4>
+            <p className="mt-1 text-xs leading-5 text-text-muted">{t('logs.enableDevLogsDesc')}</p>
           </div>
           <button
             onClick={handleToggleDevLogs}
             disabled={isLoading}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 disabled:opacity-50 ${
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 disabled:opacity-50 flex-shrink-0 ${
               devLogsEnabled ? 'bg-accent' : 'bg-surface-muted'
             }`}
           >
@@ -4326,23 +4398,30 @@ function LogsTab() {
             />
           </button>
         </div>
-      </div>
+      </section>
 
       {/* Stats */}
+      <SettingsContentSection
+        title={t('logs.logFiles')}
+        description="Current log inventory and storage footprint."
+      >
       <div className="grid grid-cols-2 gap-3">
-        <div className="p-4 rounded-xl bg-surface border border-border">
+        <div className="p-4 rounded-[1.5rem] bg-background/40 border border-border-subtle">
           <div className="text-2xl font-bold text-text-primary">{logFiles.length}</div>
           <div className="text-sm text-text-muted">{t('logs.logFiles')}</div>
         </div>
-        <div className="p-4 rounded-xl bg-surface border border-border">
+        <div className="p-4 rounded-[1.5rem] bg-background/40 border border-border-subtle">
           <div className="text-2xl font-bold text-text-primary">{formatFileSize(totalSize)}</div>
           <div className="text-sm text-text-muted">{t('logs.totalSize')}</div>
         </div>
       </div>
+      </SettingsContentSection>
 
       {/* Log Files List */}
-      <div className="space-y-2">
-        <h3 className="text-sm font-medium text-text-primary px-2">{t('logs.logFiles')}</h3>
+      <SettingsContentSection
+        title={t('logs.logFiles')}
+        description="Recent application logs available for export or inspection."
+      >
         {logFiles.length === 0 ? (
           <div className="text-center py-8 text-text-muted">
             <AlertCircle className="w-10 h-10 mx-auto mb-3 opacity-50" />
@@ -4351,7 +4430,7 @@ function LogsTab() {
         ) : (
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {logFiles.map((file) => (
-              <div key={file.path} className="p-3 rounded-lg bg-surface border border-border">
+              <div key={file.path} className="p-3 rounded-xl bg-background/45 border border-border-subtle">
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="font-mono text-sm text-text-primary truncate">{file.name}</div>
@@ -4364,17 +4443,26 @@ function LogsTab() {
             ))}
           </div>
         )}
-      </div>
+      </SettingsContentSection>
 
       {/* Directory Path */}
       {logsDirectory && (
-        <div className="p-3 rounded-lg bg-surface-muted border border-border">
+        <SettingsContentSection
+          title={t('logs.logsDirectory')}
+          description="Current on-disk location for application logs."
+        >
+        <div className="p-3 rounded-xl bg-background/45 border border-border-subtle">
           <div className="text-xs text-text-muted mb-1">{t('logs.logsDirectory')}</div>
           <div className="font-mono text-xs text-text-secondary break-all">{logsDirectory}</div>
         </div>
+        </SettingsContentSection>
       )}
 
       {/* Action Buttons */}
+      <SettingsContentSection
+        title={t('logs.actionsTitle')}
+        description="Export, reveal, or clear log files."
+      >
       <div className="grid grid-cols-3 gap-2">
         <button
           onClick={handleExport}
@@ -4391,7 +4479,7 @@ function LogsTab() {
         <button
           onClick={handleOpen}
           disabled={isLoading}
-          className="py-3 px-4 rounded-xl bg-surface border border-border text-text-primary font-medium hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-[0.98] flex items-center justify-center gap-2"
+          className="py-3 px-4 rounded-[1.4rem] bg-background/45 border border-border-subtle text-text-primary font-medium hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-[0.98] flex items-center justify-center gap-2"
         >
           <Globe className="w-4 h-4" />
           <span className="text-sm">{t('logs.openFolder')}</span>
@@ -4405,6 +4493,7 @@ function LogsTab() {
           <span className="text-sm">{t('logs.clearAll')}</span>
         </button>
       </div>
+      </SettingsContentSection>
 
       {/* Help Text */}
       <div className="text-xs text-text-muted text-center space-y-1">
