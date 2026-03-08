@@ -161,6 +161,7 @@ export function SettingsPanel({ onClose, initialTab = 'api' }: SettingsPanelProp
     { id: 'logs' as TabId, label: t('settings.logs'), icon: AlertCircle, description: t('settings.logsDesc') },
     { id: 'general' as TabId, label: t('settings.general'), icon: Globe, description: t('settings.generalDesc') },
   ];
+  const activeTabMeta = tabs.find((tab) => tab.id === activeTab);
 
   return (
       <div className="flex h-full w-full overflow-hidden bg-background">
@@ -169,7 +170,10 @@ export function SettingsPanel({ onClose, initialTab = 'api' }: SettingsPanelProp
           {!compactSidebar && (
             <div className="px-4 pt-5 pb-4 border-b border-border-muted">
               <p className="text-[11px] uppercase tracking-[0.16em] text-text-muted">{t('settings.title')}</p>
-              <h2 className="mt-1 text-[1.2rem] font-semibold tracking-[-0.03em] text-text-primary">Open Cowork</h2>
+              <h2 className="mt-1 text-[1.24rem] font-semibold tracking-[-0.03em] text-text-primary">Open Cowork</h2>
+              <p className="mt-1 text-[11px] leading-4 text-text-muted">
+                Configure your workspace, tools, and account behavior.
+              </p>
             </div>
           )}
           <div className={`flex-1 ${compactSidebar ? 'p-1.5 space-y-1' : 'p-3 space-y-1.5'}`}>
@@ -180,7 +184,7 @@ export function SettingsPanel({ onClose, initialTab = 'api' }: SettingsPanelProp
                 title={compactSidebar ? tab.label : undefined}
                 className={`w-full flex items-center ${compactSidebar ? 'justify-center p-2.5' : 'gap-3 px-3.5 py-3'} rounded-2xl text-left transition-colors active:scale-[0.98] ${
                   activeTab === tab.id
-                    ? 'bg-background text-text-primary border border-border-subtle'
+                    ? 'bg-background text-text-primary border border-border-subtle shadow-soft'
                     : 'hover:bg-background/70 text-text-secondary hover:text-text-primary'
                 }`}
               >
@@ -215,8 +219,13 @@ export function SettingsPanel({ onClose, initialTab = 'api' }: SettingsPanelProp
             <div>
               <p className="text-[11px] uppercase tracking-[0.14em] text-text-muted">{t('settings.title')}</p>
               <h3 className="mt-1 text-[1.15rem] font-semibold tracking-[-0.02em] text-text-primary">
-                {tabs.find(t => t.id === activeTab)?.label}
+                {activeTabMeta?.label}
               </h3>
+              {activeTabMeta?.description && (
+                <p className="mt-1 text-sm text-text-muted max-w-[36rem]">
+                  {activeTabMeta.description}
+                </p>
+              )}
             </div>
             <button
               onClick={onClose}
@@ -226,7 +235,28 @@ export function SettingsPanel({ onClose, initialTab = 'api' }: SettingsPanelProp
             </button>
           </div>
           <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-5 lg:px-8 lg:py-7">
-            <div className="max-w-[840px] w-full min-w-0 mx-auto">
+            <div className="max-w-[900px] w-full min-w-0 mx-auto space-y-5">
+            {activeTabMeta && (
+              <div className="rounded-[1.75rem] border border-border-subtle bg-background/70 shadow-soft px-5 py-4 lg:px-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-11 h-11 rounded-2xl border border-border-subtle bg-background/80 flex items-center justify-center text-accent flex-shrink-0">
+                    <activeTabMeta.icon className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-text-muted">{t('settings.title')}</p>
+                    <h4 className="mt-1 text-[1.15rem] font-semibold tracking-[-0.02em] text-text-primary">
+                      {activeTabMeta.label}
+                    </h4>
+                    {activeTabMeta.description && (
+                      <p className="mt-1.5 text-sm leading-6 text-text-muted max-w-[42rem]">
+                        {activeTabMeta.description}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="rounded-[2rem] border border-border-subtle bg-background/55 shadow-soft px-5 py-5 lg:px-8 lg:py-7">
             <div className={activeTab === 'api' ? '' : 'hidden'}>
               {viewedTabs.has('api') && (
                 <>
@@ -257,6 +287,7 @@ export function SettingsPanel({ onClose, initialTab = 'api' }: SettingsPanelProp
             </div>
             <div className={activeTab === 'general' ? '' : 'hidden'}>
               {viewedTabs.has('general') && <GeneralTab />}
+            </div>
             </div>
             </div>
           </div>

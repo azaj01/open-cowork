@@ -23,6 +23,8 @@ type AttachedFile = {
   inlineDataBase64?: string;
 };
 
+const welcomeLogoSrc = new URL('../../../resources/logo.png', import.meta.url).href;
+
 export function WelcomeView() {
   const { t } = useTranslation();
   const [prompt, setPrompt] = useState('');
@@ -389,13 +391,22 @@ export function WelcomeView() {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-5 py-10 md:px-8 md:py-14">
       <div className="max-w-[840px] w-full space-y-7 animate-fade-in">
-        <div className="space-y-3 text-center">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-text-muted/80">
-            Open Cowork
-          </p>
-          <h1 className="heading-serif text-[2rem] md:text-[2.5rem] font-semibold tracking-[-0.03em] text-text-primary text-center">
+        <div className="space-y-4 text-center">
+          <div className="flex items-center justify-center gap-4">
+            <img
+              src={welcomeLogoSrc}
+              alt="Open Cowork logo"
+              className="w-16 h-16 md:w-20 md:h-20 rounded-[1.4rem] object-cover border border-border-subtle bg-background/60 shadow-soft"
+            />
+            <div className="text-left">
+              <h1 className="text-[2.35rem] md:text-[3.1rem] leading-none font-semibold tracking-[-0.05em] text-text-primary">
+                Open Cowork
+              </h1>
+            </div>
+          </div>
+          <p className="heading-serif text-[1.15rem] md:text-[1.45rem] font-medium tracking-[-0.02em] text-text-secondary text-center">
             {t('welcome.title')}
-          </h1>
+          </p>
         </div>
 
         {/* Quick Action Tags */}
