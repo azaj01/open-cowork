@@ -95,6 +95,22 @@ export interface AppConfig {
 const DEFAULT_CONFIG_SET_ID = 'default';
 const MAX_CONFIG_SET_COUNT = 20;
 const LOCAL_ANTHROPIC_PLACEHOLDER_KEY = 'sk-ant-local-proxy';
+const DIRECT_READ_KEYS = new Set<keyof AppConfig>([
+  'provider',
+  'apiKey',
+  'baseUrl',
+  'customProtocol',
+  'model',
+  'activeProfileKey',
+  'activeConfigSetId',
+  'claudeCodePath',
+  'defaultWorkdir',
+  'globalSkillsPath',
+  'enableDevLogs',
+  'sandboxEnabled',
+  'enableThinking',
+  'isConfigured',
+]);
 
 const defaultProfiles: Record<ProviderProfileKey, ProviderProfile> = {
   openrouter: {
@@ -812,6 +828,13 @@ export class ConfigStore {
    * Get a specific config value
    */
   get<K extends keyof AppConfig>(key: K): AppConfig[K] {
+    if (DIRECT_READ_KEYS.has(key)) {
+      const rawValue = this.store.get(key as string) as AppConfig[K] | undefined;
+      if (rawValue !== undefined) {
+        return rawValue;
+      }
+      return defaultConfig[key];
+    }
     return this.getAll()[key];
   }
 
