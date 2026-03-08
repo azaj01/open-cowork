@@ -11,6 +11,8 @@ import type {
   ProviderType,
 } from '../types';
 import { isLoopbackBaseUrl } from '../../shared/network/loopback';
+import { API_PROVIDER_PRESETS, getModelInputGuidance } from '../../shared/api-model-presets';
+export { getModelInputGuidance } from '../../shared/api-model-presets';
 
 interface UseApiConfigStateOptions {
   enabled?: boolean;
@@ -42,75 +44,7 @@ const CONFIG_SET_LIMIT = 20;
 const DEFAULT_CONFIG_SET_ID = 'default';
 const DEFAULT_CONFIG_SET_NAME_ZH = '默认方案';
 
-export const FALLBACK_PROVIDER_PRESETS: ProviderPresets = {
-  openrouter: {
-    name: 'OpenRouter',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    models: [
-      { id: 'anthropic/claude-opus-4-6', name: 'Claude Opus 4.6' },
-      { id: 'anthropic/claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
-      { id: 'anthropic/claude-haiku-4-5', name: 'Claude Haiku 4.5' },
-      { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
-      { id: 'openai/o3', name: 'o3' },
-      { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-      { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-    ],
-    keyPlaceholder: 'sk-or-v1-...',
-    keyHint: 'Get from openrouter.ai/keys',
-  },
-  anthropic: {
-    name: 'Anthropic',
-    baseUrl: 'https://api.anthropic.com',
-    models: [
-      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
-      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
-      { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
-      { id: 'claude-opus-4-5', name: 'Claude Opus 4.5' },
-      { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
-    ],
-    keyPlaceholder: 'sk-ant-...',
-    keyHint: 'Get from console.anthropic.com',
-  },
-  openai: {
-    name: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    models: [
-      { id: 'gpt-4.1', name: 'GPT-4.1' },
-      { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini' },
-      { id: 'o3', name: 'o3' },
-      { id: 'o4-mini', name: 'o4-mini' },
-      { id: 'gpt-4o', name: 'GPT-4o' },
-      { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
-    ],
-    keyPlaceholder: 'sk-...',
-    keyHint: 'Get from platform.openai.com',
-  },
-  gemini: {
-    name: 'Gemini',
-    baseUrl: 'https://generativelanguage.googleapis.com',
-    models: [
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-      { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
-      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
-    ],
-    keyPlaceholder: 'AIza...',
-    keyHint: 'Get from aistudio.google.com',
-  },
-  custom: {
-    name: 'More Models',
-    baseUrl: '',
-    models: [
-      { id: 'deepseek-chat', name: 'DeepSeek V3' },
-      { id: 'deepseek-reasoner', name: 'DeepSeek R1' },
-      { id: 'moonshot-v1-auto', name: 'Kimi (Moonshot)' },
-      { id: 'glm-4-plus', name: 'GLM-4-Plus (Zhipu)' },
-      { id: 'qwen-max', name: 'Qwen Max (Alibaba)' },
-    ],
-    keyPlaceholder: 'sk-xxx',
-    keyHint: 'Enter your API Key',
-  },
-};
+export const FALLBACK_PROVIDER_PRESETS: ProviderPresets = API_PROVIDER_PRESETS;
 
 const PROFILE_KEYS: ProviderProfileKey[] = [
   'openrouter',
@@ -195,13 +129,30 @@ function modelPresetForProfile(profileKey: ProviderProfileKey, presets: Provider
 
 function defaultProfileForKey(profileKey: ProviderProfileKey, presets: ProviderPresets): UIProviderProfile {
   const preset = modelPresetForProfile(profileKey, presets);
+  const prefersCustomInput = profileKey.startsWith('custom:');
   return {
     apiKey: '',
     baseUrl: preset.baseUrl,
     model: preset.models[0]?.id || '',
     customModel: '',
-    useCustomModel: false,
+    useCustomModel: prefersCustomInput,
   };
+}
+
+function isPristineCustomProfile(
+  profileKey: ProviderProfileKey,
+  profile: Partial<ProviderProfile> | undefined,
+  fallback: UIProviderProfile
+): boolean {
+  if (!profileKey.startsWith('custom:') || !profile) {
+    return false;
+  }
+
+  const apiKey = profile.apiKey?.trim() || '';
+  const baseUrl = profile.baseUrl?.trim() || fallback.baseUrl;
+  const model = profile.model?.trim() || fallback.model;
+
+  return apiKey === '' && baseUrl === fallback.baseUrl && model === fallback.model;
 }
 
 function normalizeProfile(
@@ -210,6 +161,20 @@ function normalizeProfile(
   presets: ProviderPresets
 ): UIProviderProfile {
   const fallback = defaultProfileForKey(profileKey, presets);
+  if (!profile) {
+    return fallback;
+  }
+
+  if (isPristineCustomProfile(profileKey, profile, fallback)) {
+    return {
+      ...fallback,
+      apiKey: '',
+      baseUrl: fallback.baseUrl,
+      customModel: '',
+      useCustomModel: true,
+    };
+  }
+
   const modelValue = profile?.model?.trim() || fallback.model;
   const hasPresetModel = modelPresetForProfile(profileKey, presets).models.some((item) => item.id === modelValue);
   return {
@@ -394,6 +359,7 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
   const modelPreset = modelPresetForProfile(activeProfileKey, presets);
   const currentPreset = modelPreset;
   const modelOptions = modelPreset.models;
+  const modelInputGuidance = getModelInputGuidance(provider, customProtocol);
 
   const currentConfigSet = useMemo(
     () => configSets.find((set) => set.id === activeConfigSetId) || null,
@@ -858,6 +824,8 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
     model,
     customModel,
     useCustomModel,
+    modelInputPlaceholder: modelInputGuidance.placeholder,
+    modelInputHint: modelInputGuidance.hint,
     enableThinking,
     isSaving,
     isTesting,

@@ -8,6 +8,7 @@ import {
   shouldAllowEmptyGeminiApiKey,
   shouldUseAnthropicAuthToken,
 } from './auth-utils';
+import { API_PROVIDER_PRESETS, PI_AI_CURATED_PRESETS } from '../../shared/api-model-presets';
 
 /**
  * Application configuration schema
@@ -99,17 +100,17 @@ const defaultProfiles: Record<ProviderProfileKey, ProviderProfile> = {
   openrouter: {
     apiKey: '',
     baseUrl: 'https://openrouter.ai/api/v1',
-    model: 'anthropic/claude-sonnet-4.5',
+    model: 'anthropic/claude-sonnet-4-6',
   },
   anthropic: {
     apiKey: '',
     baseUrl: 'https://api.anthropic.com',
-    model: 'claude-sonnet-4-5',
+    model: 'claude-sonnet-4-6',
   },
   openai: {
     apiKey: '',
     baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-5.2',
+    model: 'gpt-5.4',
   },
   gemini: {
     apiKey: '',
@@ -119,12 +120,12 @@ const defaultProfiles: Record<ProviderProfileKey, ProviderProfile> = {
   'custom:anthropic': {
     apiKey: '',
     baseUrl: 'https://open.bigmodel.cn/api/anthropic',
-    model: 'glm-4.7',
+    model: 'glm-5',
   },
   'custom:openai': {
     apiKey: '',
     baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-5.2',
+    model: 'gpt-5.4',
   },
   'custom:gemini': {
     apiKey: '',
@@ -164,99 +165,8 @@ const defaultConfig: AppConfig = {
   isConfigured: false,
 };
 
-// Provider presets
-export const PROVIDER_PRESETS = {
-  openrouter: {
-    name: 'OpenRouter',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    models: [
-      { id: 'anthropic/claude-opus-4-6', name: 'Claude Opus 4.6' },
-      { id: 'anthropic/claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
-      { id: 'anthropic/claude-haiku-4-5', name: 'Claude Haiku 4.5' },
-      { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
-      { id: 'openai/o3', name: 'o3' },
-      { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-      { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-    ],
-    keyPlaceholder: 'sk-or-v1-...',
-    keyHint: '从 openrouter.ai/keys 获取',
-  },
-  anthropic: {
-    name: 'Anthropic',
-    baseUrl: 'https://api.anthropic.com',
-    models: [
-      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
-      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
-      { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
-      { id: 'claude-opus-4-5', name: 'Claude Opus 4.5' },
-      { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
-    ],
-    keyPlaceholder: 'sk-ant-...',
-    keyHint: '从 console.anthropic.com 获取',
-  },
-  openai: {
-    name: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    models: [
-      { id: 'gpt-4.1', name: 'GPT-4.1' },
-      { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini' },
-      { id: 'o3', name: 'o3' },
-      { id: 'o4-mini', name: 'o4-mini' },
-      { id: 'gpt-4o', name: 'GPT-4o' },
-      { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
-    ],
-    keyPlaceholder: 'sk-...',
-    keyHint: '从 platform.openai.com 获取',
-  },
-  gemini: {
-    name: 'Gemini',
-    baseUrl: 'https://generativelanguage.googleapis.com',
-    models: [
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-      { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
-      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
-    ],
-    keyPlaceholder: 'AIza...',
-    keyHint: '从 aistudio.google.com 获取',
-  },
-  custom: {
-    name: '更多模型',
-    baseUrl: '',
-    models: [
-      { id: 'deepseek-chat', name: 'DeepSeek V3' },
-      { id: 'deepseek-reasoner', name: 'DeepSeek R1' },
-      { id: 'moonshot-v1-auto', name: 'Kimi (Moonshot)' },
-      { id: 'glm-4-plus', name: 'GLM-4-Plus (智谱)' },
-      { id: 'qwen-max', name: 'Qwen Max (阿里)' },
-    ],
-    keyPlaceholder: 'sk-xxx',
-    keyHint: '输入你的 API Key',
-  },
-};
-
-// Curated model IDs per provider — shown when pi-ai registry is available.
-const PI_AI_CURATED: Record<string, { piProvider: string; pick: string[] }> = {
-  openrouter: {
-    piProvider: 'openrouter',
-    pick: [
-      'anthropic/claude-opus-4-6', 'anthropic/claude-sonnet-4-6', 'anthropic/claude-haiku-4-5',
-      'openai/gpt-4.1', 'openai/o3', 'google/gemini-2.5-flash', 'google/gemini-2.5-pro',
-    ],
-  },
-  anthropic: {
-    piProvider: 'anthropic',
-    pick: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-opus-4-5', 'claude-sonnet-4-5'],
-  },
-  openai: {
-    piProvider: 'openai',
-    pick: ['gpt-4.1', 'gpt-4.1-mini', 'o3', 'o4-mini', 'gpt-4o', 'gpt-4o-mini'],
-  },
-  gemini: {
-    piProvider: 'google',
-    pick: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'],
-  },
-};
+export const PROVIDER_PRESETS = API_PROVIDER_PRESETS;
+const PI_AI_CURATED: Record<string, { piProvider: string; pick: string[] }> = PI_AI_CURATED_PRESETS;
 
 // Cached dynamic presets — populated once by async import.
 let cachedDynamicPresets: typeof PROVIDER_PRESETS | null = null;

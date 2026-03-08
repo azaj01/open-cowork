@@ -3,6 +3,7 @@ import type { AppConfig } from '../src/renderer/types';
 import {
   FALLBACK_PROVIDER_PRESETS,
   buildApiConfigSnapshot,
+  getModelInputGuidance,
   isCustomAnthropicLoopbackGateway,
   isCustomGeminiLoopbackGateway,
   profileKeyFromProvider,
@@ -31,12 +32,12 @@ describe('api config state helpers', () => {
       activeProfileKey: 'custom:openai',
       apiKey: 'sk-active',
       baseUrl: 'https://custom-openai.example/v1',
-      model: 'gpt-5.2-codex',
+      model: 'gpt-5.3-codex',
       profiles: {
         'custom:openai': {
           apiKey: 'sk-custom-openai',
           baseUrl: 'https://custom-openai.example/v1',
-          model: 'gpt-5.2-codex',
+          model: 'gpt-5.3-codex',
         },
         'custom:anthropic': {
           apiKey: 'sk-custom-anthropic',
@@ -61,12 +62,12 @@ describe('api config state helpers', () => {
       activeProfileKey: 'openai',
       apiKey: 'sk-openai',
       baseUrl: 'https://api.openai.com/v1',
-      model: 'gpt-5.2',
+      model: 'gpt-5.4',
       profiles: {
         openai: {
           apiKey: 'sk-openai',
           baseUrl: 'https://api.openai.com/v1',
-          model: 'gpt-5.2',
+          model: 'gpt-5.4',
         },
       },
       isConfigured: true,
@@ -76,6 +77,8 @@ describe('api config state helpers', () => {
     expect(snapshot.profiles.openai.apiKey).toBe('sk-openai');
     expect(snapshot.profiles.openrouter.baseUrl).toBe(FALLBACK_PROVIDER_PRESETS.openrouter.baseUrl);
     expect(snapshot.profiles['custom:anthropic'].model).toBe(FALLBACK_PROVIDER_PRESETS.custom.models[0]?.id);
+    expect(snapshot.profiles['custom:anthropic'].useCustomModel).toBe(true);
+    expect(snapshot.profiles['custom:anthropic'].customModel).toBe('');
   });
 
   it('detects local custom anthropic loopback gateway url', () => {
@@ -121,5 +124,46 @@ describe('api config state helpers', () => {
     expect(snapshot.activeProfileKey).toBe('custom:gemini');
     expect(snapshot.profiles.gemini.apiKey).toBe('AIza-official');
     expect(snapshot.profiles['custom:gemini'].baseUrl).toBe('https://gemini-proxy.example/v1');
+  });
+
+  it('keeps pristine custom openai profile in manual input mode', () => {
+    const config = {
+      provider: 'custom',
+      customProtocol: 'openai',
+      activeProfileKey: 'custom:openai',
+      apiKey: '',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-5.4',
+      profiles: {
+        'custom:openai': {
+          apiKey: '',
+          baseUrl: 'https://api.openai.com/v1',
+          model: 'gpt-5.4',
+        },
+      },
+      isConfigured: false,
+    } as AppConfig;
+
+    const snapshot = buildApiConfigSnapshot(config, FALLBACK_PROVIDER_PRESETS);
+    expect(snapshot.profiles['custom:openai'].useCustomModel).toBe(true);
+    expect(snapshot.profiles['custom:openai'].customModel).toBe('');
+    expect(snapshot.profiles['custom:openai'].model).toBe('gpt-5.4');
+  });
+
+  it('exposes updated preset lists and custom guidance', () => {
+    expect(FALLBACK_PROVIDER_PRESETS.openai.models.map((item) => item.id)).toContain('gpt-5.4');
+    expect(FALLBACK_PROVIDER_PRESETS.openai.models.map((item) => item.id)).toContain('gpt-5.3-codex');
+    expect(FALLBACK_PROVIDER_PRESETS.openai.models.map((item) => item.id)).not.toContain('gpt-5.2');
+    expect(FALLBACK_PROVIDER_PRESETS.anthropic.models.map((item) => item.id)).toContain('claude-sonnet-4-6');
+    expect(FALLBACK_PROVIDER_PRESETS.gemini.models.map((item) => item.id)).toContain('gemini-3.1-pro-preview');
+    expect(FALLBACK_PROVIDER_PRESETS.custom.models.map((item) => item.id)).toContain('kimi-thinking-preview');
+    expect(FALLBACK_PROVIDER_PRESETS.custom.models.map((item) => item.id)).toContain('glm-5');
+    expect(FALLBACK_PROVIDER_PRESETS.custom.models.map((item) => item.id)).toContain('MiniMax-M2.5');
+    expect(FALLBACK_PROVIDER_PRESETS.custom.models.map((item) => item.id)).toContain('grok-code-fast-1');
+    expect(FALLBACK_PROVIDER_PRESETS.custom.models.map((item) => item.id)).toContain('mistral-large-latest');
+
+    expect(getModelInputGuidance('custom', 'openai').placeholder).toContain('deepseek-chat');
+    expect(getModelInputGuidance('custom', 'openai').placeholder).toContain('kimi-thinking-preview');
+    expect(getModelInputGuidance('custom', 'openai').hint).toContain('exact model ID');
   });
 });

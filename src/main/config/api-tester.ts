@@ -89,7 +89,7 @@ async function testOpenAICredentials(
   });
 
   if (useLiveRequest) {
-    const model = modelInput || 'gpt-4o-mini';
+    const model = modelInput || 'gpt-5-mini';
     try {
       await client.responses.create({
         model,
@@ -204,7 +204,7 @@ export async function testApiConnection(input: ApiTestInput): Promise<ApiTestRes
         if (useLiveRequest || useAuthTokenHeader || input.provider === 'custom') {
           // OpenRouter/custom Anthropic-compatible services don't reliably support models.list(),
           // so we use a tiny messages.create request for compatibility.
-          const model = input.model || 'claude-sonnet-4-5';
+          const model = input.model || 'claude-sonnet-4-6';
           await client.messages.create({
             model,
             max_tokens: 1,

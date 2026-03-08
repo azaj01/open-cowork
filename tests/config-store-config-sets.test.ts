@@ -54,7 +54,7 @@ describe('ConfigStore config sets', () => {
       customProtocol: 'openai',
       apiKey: 'sk-legacy-openai',
       baseUrl: 'https://api.openai.com/v1',
-      model: 'gpt-5.2-mini',
+      model: 'gpt-5-mini',
       enableThinking: true,
       isConfigured: true,
     };
@@ -77,7 +77,7 @@ describe('ConfigStore config sets', () => {
       customProtocol: 'anthropic',
       apiKey: 'sk-openrouter-origin',
       baseUrl: 'https://openrouter.ai/api',
-      model: 'anthropic/claude-sonnet-4.5',
+      model: 'anthropic/claude-sonnet-4-6',
       enableThinking: false,
       isConfigured: true,
     };
@@ -90,7 +90,7 @@ describe('ConfigStore config sets', () => {
     expect(newSet?.name).toBe('Work OpenAI');
     expect(created.activeConfigSetId).toBe(newSet?.id);
 
-    store.update({ provider: 'openai', apiKey: 'sk-openai-new', model: 'gpt-5.2-mini' });
+    store.update({ provider: 'openai', apiKey: 'sk-openai-new', model: 'gpt-5-mini' });
     const openaiSetView = store.getAll();
     expect(openaiSetView.provider).toBe('openai');
     expect(openaiSetView.apiKey).toBe('sk-openai-new');
@@ -139,7 +139,7 @@ describe('ConfigStore config sets', () => {
     expect(blankSet?.enableThinking).toBe(false);
     expect(blankSet?.profiles['custom:openai']?.apiKey).toBe('');
     expect(blankSet?.profiles['custom:openai']?.baseUrl).toBe('https://api.openai.com/v1');
-    expect(blankSet?.profiles['custom:openai']?.model).toBe('gpt-5.2');
+    expect(blankSet?.profiles['custom:openai']?.model).toBe('gpt-5.4');
     expect(created.activeConfigSetId).toBe(blankSet?.id);
     expect(created.provider).toBe('custom');
     expect(created.customProtocol).toBe('openai');

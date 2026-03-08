@@ -104,7 +104,7 @@
     "selectProtocol": "选择服务的兼容协议",
     "enterOpenAIUrl": "输入 OpenAI 兼容的服务 URL",
     "enterAnthropicUrl": "输入 Anthropic 兼容的服务 URL",
-    "enterModelId": "输入模型 ID，例如：moonshotai/kimi-k2-0905, openai/gpt-4o",
+    "enterModelId": "输入模型 ID，例如：deepseek-chat、kimi-thinking-preview、gpt-5.2",
     "selectModelRequired": "请选择模型",
     "saveFailed": "保存失败，请稍后重试",
     "getStarted": "开始使用",

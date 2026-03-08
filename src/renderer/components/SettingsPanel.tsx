@@ -270,6 +270,8 @@ function APISettingsTab() {
     model,
     customModel,
     useCustomModel,
+    modelInputPlaceholder,
+    modelInputHint,
     presets,
     currentPreset,
     modelOptions,
@@ -469,15 +471,7 @@ function APISettingsTab() {
             type="text"
             value={customModel}
             onChange={(e) => setCustomModel(e.target.value)}
-            placeholder={
-              provider === 'openrouter'
-                ? 'openai/gpt-4o or other model ID'
-                : provider === 'openai' || (provider === 'custom' && customProtocol === 'openai')
-                  ? 'gpt-4o'
-                  : provider === 'gemini' || (provider === 'custom' && customProtocol === 'gemini')
-                    ? 'gemini/gemini-2.5-flash'
-                  : 'claude-sonnet-4'
-            }
+            placeholder={modelInputPlaceholder}
             className="w-full px-4 py-3 rounded-xl bg-background border border-border text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
           />
         ) : (
@@ -495,7 +489,7 @@ function APISettingsTab() {
         )}
         {useCustomModel && (
           <p className="text-xs text-text-muted">
-            {t('api.enterModelId')}
+            {modelInputHint}
           </p>
         )}
       </div>
