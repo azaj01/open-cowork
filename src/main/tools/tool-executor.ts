@@ -329,7 +329,6 @@ export class ToolExecutor {
       />\s*\/dev\//i,
       /curl.*\|\s*(?:ba)?sh/i,
       /wget.*\|\s*(?:ba)?sh/i,
-      /sudo\s/i,
       /format\s+[A-Za-z]:/i,
       /del\s+\/[sfq]/i,
       /rmdir\s+\/[sq]/i,

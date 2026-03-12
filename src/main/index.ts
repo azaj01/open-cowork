@@ -1,3 +1,17 @@
+/**
+ * @module main/index
+ *
+ * Electron main-process entry point (2181 lines).
+ *
+ * Responsibilities:
+ * - App lifecycle: ready, activate, before-quit, window-will-close
+ * - Central IPC hub: ~60 handlers namespaced as config.*, mcp.*, session.*,
+ *   sandbox.*, logs.*, remote.*, schedule.*, etc.
+ * - BrowserWindow creation and deep-link / protocol handling
+ *
+ * Dependencies: session-manager, config-store, mcp-manager, sandbox-adapter,
+ *               skills-manager, scheduled-task-manager, nav-server, remote-manager
+ */
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import { join, resolve, dirname, isAbsolute, basename } from 'path';
 import * as fs from 'fs';

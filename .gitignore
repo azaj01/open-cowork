@@ -69,3 +69,17 @@ docs/bench/
 /.mcp.json
 /eng.traineddata
 /jpn.traineddata
+
+# Worktrees
+.worktrees/
+
+# Empty vendored deps
+vendor/
+
+# LSP config
+.cclsp.json
+
+# Temp work products
+progress.md
+task_plan.md
+findings.md

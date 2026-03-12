@@ -1,3 +1,16 @@
+/**
+ * @module main/schedule/scheduled-task-manager
+ *
+ * Cron-like scheduled task system (488 lines).
+ *
+ * Responsibilities:
+ * - Scheduled task CRUD with daily/weekly/interval repeat modes
+ * - Timer-based execution engine with tick loop
+ * - Task persistence via SQLite (ScheduledTask rows)
+ * - Delegates execution to session-manager for AI-powered tasks
+ *
+ * Dependencies: session-manager, database
+ */
 import {
   buildScheduledTaskFallbackTitle,
   buildScheduledTaskTitle,

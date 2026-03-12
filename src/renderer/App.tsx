@@ -5,6 +5,7 @@ import { useWindowSize } from './hooks/useWindowSize';
 import { Sidebar } from './components/Sidebar';
 import { WelcomeView } from './components/WelcomeView';
 import { PermissionDialog } from './components/PermissionDialog';
+import { SudoPasswordDialog } from './components/SudoPasswordDialog';
 import { Titlebar } from './components/Titlebar';
 import { SandboxSetupDialog } from './components/SandboxSetupDialog';
 import { SandboxSyncToast } from './components/SandboxSyncToast';
@@ -35,6 +36,7 @@ function ContextPanelFallback() {
 function App() {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const pendingPermission = useAppStore((s) => s.pendingPermission);
+  const pendingSudoPassword = useAppStore((s) => s.pendingSudoPassword);
   const settings = useAppStore((s) => s.settings);
   const showConfigModal = useAppStore((s) => s.showConfigModal);
   const showSettings = useAppStore((s) => s.showSettings);
@@ -165,6 +167,9 @@ function App() {
       
       {/* Permission Dialog */}
       {pendingPermission && <PermissionDialog permission={pendingPermission} />}
+
+      {/* Sudo Password Dialog */}
+      {pendingSudoPassword && <SudoPasswordDialog request={pendingSudoPassword} />}
       
       {/* Config Modal */}
       <Suspense fallback={null}>

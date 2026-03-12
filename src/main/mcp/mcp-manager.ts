@@ -1,3 +1,16 @@
+/**
+ * @module main/mcp/mcp-manager
+ *
+ * Model Context Protocol (MCP) server manager (1321 lines).
+ *
+ * Responsibilities:
+ * - MCP server config CRUD (add, update, delete, list)
+ * - Server lifecycle: start, stop, restart with health checks
+ * - Transport handling: stdio (child process) and SSE (HTTP stream)
+ * - Tool/resource/prompt discovery from connected servers
+ *
+ * Dependencies: config-store (via mcp-config-store)
+ */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';

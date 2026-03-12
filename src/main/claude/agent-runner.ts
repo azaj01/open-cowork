@@ -1,3 +1,17 @@
+/**
+ * @module main/claude/agent-runner
+ *
+ * AI query execution engine (1514 lines).
+ *
+ * Responsibilities:
+ * - Runs AI conversations via the pi-coding-agent SDK (createAgentSession)
+ * - Routes providers: Anthropic direct vs Python proxy for OpenAI/Gemini/OpenRouter
+ * - Bridges MCP tools into SDK ToolDefinition format
+ * - Streams responses back as ServerEvents (stream.message, stream.partial, trace.step)
+ * - Skills injection, system prompt assembly, permission handling
+ *
+ * Dependencies: session-manager, mcp-manager, config-store, proxy-manager, skills-manager
+ */
 import {
   createAgentSession,
   SessionManager as PiSessionManager,

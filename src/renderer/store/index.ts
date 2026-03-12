@@ -4,6 +4,7 @@ import type {
   Message,
   TraceStep,
   PermissionRequest,
+  SudoPasswordRequest,
   Settings,
   AppConfig,
   SandboxSetupProgress,
@@ -48,6 +49,9 @@ interface AppState {
 
   // Permission
   pendingPermission: PermissionRequest | null;
+
+  // Sudo password
+  pendingSudoPassword: SudoPasswordRequest | null;
 
   // Settings
   settings: Settings;
@@ -102,6 +106,8 @@ interface AppState {
   setSettingsTab: (tab: string | null) => void;
 
   setPendingPermission: (permission: PermissionRequest | null) => void;
+
+  setPendingSudoPassword: (request: SudoPasswordRequest | null) => void;
 
   updateSettings: (updates: Partial<Settings>) => void;
 
@@ -169,6 +175,7 @@ export const useAppStore = create<AppState>((set) => ({
   showSettings: false,
   settingsTab: null,
   pendingPermission: null,
+  pendingSudoPassword: null,
   settings: defaultSettings,
   appConfig: null,
   isConfigured: false,
@@ -443,6 +450,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Permission actions
   setPendingPermission: (permission) => set({ pendingPermission: permission }),
+
+  // Sudo password actions
+  setPendingSudoPassword: (request) => set({ pendingSudoPassword: request }),
 
   // Settings actions
   updateSettings: (updates) =>

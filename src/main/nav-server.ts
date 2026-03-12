@@ -1,3 +1,15 @@
+/**
+ * @module main/nav-server
+ *
+ * CLI-driven UI navigation server (155 lines).
+ *
+ * Exposes HTTP endpoints on 127.0.0.1:19888 for external tools (e.g. Claude Code)
+ * to control app page navigation programmatically:
+ *   GET /status           → current page state
+ *   GET /navigate?page=X  → navigate to welcome, settings, or session pages
+ *
+ * Dependencies: electron (BrowserWindow)
+ */
 import * as http from 'http';
 import { URL } from 'url';
 import { BrowserWindow } from 'electron';

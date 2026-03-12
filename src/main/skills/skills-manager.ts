@@ -1,3 +1,16 @@
+/**
+ * @module main/skills/skills-manager
+ *
+ * Skill discovery and lifecycle (999 lines).
+ *
+ * Responsibilities:
+ * - Discovers built-in skills from .claude/skills/ directories
+ * - Parses SKILL.md front-matter for metadata (name, description, triggers)
+ * - Hot-reload via chokidar file watcher
+ * - Plugin install/uninstall from npm-style package specs
+ *
+ * Dependencies: config-store, database, chokidar
+ */
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';

@@ -1,3 +1,16 @@
+/**
+ * @module main/session/session-manager
+ *
+ * Session lifecycle manager (957 lines).
+ *
+ * Responsibilities:
+ * - Session CRUD: create, continue, stop, delete, list
+ * - Chat history persistence to SQLite via DatabaseInstance
+ * - Workspace-scoped sessions with sandbox integration
+ * - Delegates AI execution to ClaudeAgentRunner
+ *
+ * Dependencies: database, agent-runner, config-store, mcp-manager, sandbox-adapter
+ */
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';

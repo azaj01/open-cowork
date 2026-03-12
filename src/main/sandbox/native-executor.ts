@@ -98,7 +98,6 @@ export class NativeExecutor implements SandboxExecutor {
       />\s*\/dev\//i,
       /curl.*\|\s*(?:ba)?sh/i,
       /wget.*\|\s*(?:ba)?sh/i,
-      /sudo\s/i,
     ];
 
     if (process.platform === 'win32') {

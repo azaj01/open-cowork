@@ -1,3 +1,16 @@
+/**
+ * @module main/config/config-store
+ *
+ * Persistent application configuration (1373 lines).
+ *
+ * Responsibilities:
+ * - electron-store backed config persistence (API keys, model presets, settings)
+ * - Config set management: create, rename, delete, switch between config profiles
+ * - API key validation and provider credential resolution
+ * - Model preset definitions (Anthropic, OpenAI, Gemini, OpenRouter, Ollama)
+ *
+ * Dependencies: electron-store, auth-utils, api-model-presets
+ */
 import Store from 'electron-store';
 import { log, logWarn } from '../utils/logger';
 import {
