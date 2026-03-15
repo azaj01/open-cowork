@@ -74,6 +74,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Platform info
   platform: process.platform,
 
+  // System theme
+  getSystemTheme: () => ipcRenderer.invoke('system.getTheme'),
+
   // App info
   getVersion: () => ipcRenderer.invoke('get-version'),
 
@@ -352,6 +355,7 @@ declare global {
       on: (callback: (event: ServerEvent) => void) => () => void;
       invoke: <T>(event: ClientEvent) => Promise<T>;
       platform: NodeJS.Platform;
+      getSystemTheme: () => Promise<{ shouldUseDarkColors: boolean }>;
       getVersion: () => Promise<string>;
       openExternal: (url: string) => Promise<boolean>;
       showItemInFolder: (filePath: string, cwd?: string) => Promise<boolean>;

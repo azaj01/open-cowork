@@ -294,6 +294,21 @@ export function useIPC() {
           }
           break;
 
+        case 'native-theme.changed':
+          store.setSystemDarkMode(event.payload.shouldUseDarkColors);
+          break;
+
+        case 'new-session':
+          store.setActiveSession(null);
+          store.setShowSettings(false);
+          break;
+
+        case 'navigate':
+          if (event.payload === 'settings') {
+            store.setShowSettings(true);
+          }
+          break;
+
         default:
           console.log('[useIPC] Unknown server event:', event);
       }

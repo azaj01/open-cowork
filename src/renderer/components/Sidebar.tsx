@@ -8,6 +8,7 @@ import {
   Trash2,
   Moon,
   Sun,
+  Monitor,
   Settings,
   Search as SearchIcon,
   Plus,
@@ -195,8 +196,15 @@ export function Sidebar() {
   };
 
   const toggleTheme = () => {
-    updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' });
+    const next = settings.theme === 'dark' ? 'light' : settings.theme === 'light' ? 'system' : 'dark';
+    updateSettings({ theme: next });
   };
+
+  const themeIcon = settings.theme === 'dark'
+    ? <Sun className="w-4 h-4" />
+    : settings.theme === 'light'
+      ? <Moon className="w-4 h-4" />
+      : <Monitor className="w-4 h-4" />;
 
   if (sidebarCollapsed) {
     return (
@@ -234,7 +242,7 @@ export function Sidebar() {
             className="w-9 h-9 rounded-2xl flex items-center justify-center hover:bg-surface-hover transition-colors text-text-secondary"
             title={t('sidebar.themeToggle')}
           >
-            {settings.theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            {themeIcon}
           </button>
           <button
             onClick={() => setShowSettings(true)}
@@ -469,7 +477,7 @@ export function Sidebar() {
             className="w-8 h-8 rounded-xl flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors flex-shrink-0"
             title={t('sidebar.themeToggle')}
           >
-            {settings.theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            {themeIcon}
           </button>
         </div>
       </div>

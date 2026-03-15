@@ -392,6 +392,9 @@ export type ServerEvent =
   | { type: 'proxy.warmup'; payload: { status: 'warming' | 'ready' | 'failed' } }
   | { type: 'session.contextInfo'; payload: { sessionId: string; contextWindow: number } }
   | { type: 'navigate.to'; payload: { page: 'welcome' | 'settings' | 'session'; tab?: string; sessionId?: string } }
+  | { type: 'native-theme.changed'; payload: { shouldUseDarkColors: boolean } }
+  | { type: 'new-session' }
+  | { type: 'navigate'; payload: string }
   | { type: 'error'; payload: { message: string; code?: 'CONFIG_REQUIRED_ACTIVE_SET'; action?: 'open_api_settings' } };
 
 // Settings types

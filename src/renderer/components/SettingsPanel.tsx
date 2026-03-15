@@ -4624,6 +4624,7 @@ function GeneralTab() {
   const themeOptions = [
     { value: 'light' as const, label: t('general.themeLight') },
     { value: 'dark' as const, label: t('general.themeDark') },
+    { value: 'system' as const, label: t('general.themeSystem', 'System') },
   ];
 
   return (

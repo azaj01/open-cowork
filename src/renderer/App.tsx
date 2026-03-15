@@ -71,13 +71,19 @@ function App() {
   }, []); // Empty deps - run once
 
   // Apply theme to document root
+  const systemDarkMode = useAppStore((s) => s.systemDarkMode);
   useEffect(() => {
-    if (settings.theme === 'light') {
+    const effectiveTheme =
+      settings.theme === 'system'
+        ? (systemDarkMode ? 'dark' : 'light')
+        : settings.theme;
+
+    if (effectiveTheme === 'light') {
       document.documentElement.classList.add('light');
     } else {
       document.documentElement.classList.remove('light');
     }
-  }, [settings.theme]);
+  }, [settings.theme, systemDarkMode]);
 
   // Auto-collapse panels based on window width
   useEffect(() => {

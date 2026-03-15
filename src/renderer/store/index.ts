@@ -85,6 +85,9 @@ interface AppState {
   // Context window per session (from model resolution)
   contextWindowBySession: Record<string, number>;
 
+  // System theme (from OS native theme)
+  systemDarkMode: boolean;
+
   // Actions
   setSessions: (sessions: Session[]) => void;
   addSession: (session: Session) => void;
@@ -149,6 +152,9 @@ interface AppState {
 
   // Context window actions
   setSessionContextWindow: (sessionId: string, contextWindow: number) => void;
+
+  // System theme actions
+  setSystemDarkMode: (dark: boolean) => void;
 }
 
 const defaultSettings: Settings = {
@@ -210,6 +216,7 @@ export const useAppStore = create<AppState>((set) => ({
   skillsStorageChangedAt: 0,
   skillsStorageChangeEvent: null,
   contextWindowBySession: {},
+  systemDarkMode: false,
 
   // Session actions
   setSessions: (sessions) => set({ sessions }),
@@ -629,6 +636,9 @@ export const useAppStore = create<AppState>((set) => ({
         [sessionId]: contextWindow,
       },
     })),
+
+  // System theme actions
+  setSystemDarkMode: (dark) => set({ systemDarkMode: dark }),
 }));
 
 // Expose helpers for nav-server (CLI-driven UI navigation via executeJavaScript)

@@ -69,25 +69,31 @@
   body {
     background-color: var(--color-background);
     color: var(--color-text-primary);
-    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Plus Jakarta Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
-  /* Custom scrollbar - subtle */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
+  /* Custom scrollbar — only on non-macOS platforms.
+     macOS uses native overlay scrollbars which are better. */
+  @supports not (font: -apple-system-body) {
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
 
-  ::-webkit-scrollbar-track {
-    @apply bg-transparent;
-  }
+    ::-webkit-scrollbar-track {
+      @apply bg-transparent;
+    }
 
-  ::-webkit-scrollbar-thumb {
-    @apply bg-border rounded-full;
-  }
+    ::-webkit-scrollbar-thumb {
+      @apply bg-border rounded-full;
+    }
 
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-text-muted;
+    ::-webkit-scrollbar-thumb:hover {
+      @apply bg-text-muted;
+    }
   }
 }
 
