@@ -140,14 +140,6 @@ export function ConfigModal({
         return t('api.testError.network_error');
       case 'ollama_not_running':
         return t('api.testError.ollama_not_running');
-      case 'proxy_boot_failed':
-        return t('api.testError.proxy_boot_failed');
-      case 'proxy_health_failed':
-        return t('api.testError.proxy_health_failed');
-      case 'proxy_upstream_auth_failed':
-        return t('api.testError.proxy_upstream_auth_failed');
-      case 'proxy_upstream_not_found':
-        return t('api.testError.proxy_upstream_not_found');
       default:
         return t('api.testError.unknown');
     }

@@ -257,22 +257,6 @@ export function useIPC() {
           store.setSessionContextWindow(event.payload.sessionId, event.payload.contextWindow);
           break;
 
-        case 'proxy.warmup':
-          if (event.payload.status === 'warming') {
-            store.setGlobalNotice({
-              id: 'proxy-warmup',
-              type: 'info',
-              message: i18n.t('api.proxyWarming'),
-              messageKey: 'api.proxyWarming',
-            });
-          } else {
-            const current = useAppStore.getState().globalNotice;
-            if (current?.id === 'proxy-warmup') {
-              store.clearGlobalNotice();
-            }
-          }
-          break;
-
         case 'error':
           console.error('[useIPC] Server error:', event.payload.message);
           store.setLoading(false);

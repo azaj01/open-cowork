@@ -5,12 +5,12 @@
  *
  * Responsibilities:
  * - Runs AI conversations via the pi-coding-agent SDK (createAgentSession)
- * - Routes providers: Anthropic direct vs Python proxy for OpenAI/Gemini/OpenRouter
+ * - Routes providers via pi-ai SDK for model resolution
  * - Bridges MCP tools into SDK ToolDefinition format
  * - Streams responses back as ServerEvents (stream.message, stream.partial, trace.step)
  * - Skills injection, system prompt assembly, permission handling
  *
- * Dependencies: session-manager, mcp-manager, config-store, proxy-manager, skills-manager
+ * Dependencies: session-manager, mcp-manager, config-store, skills-manager
  */
 import {
   createAgentSession,

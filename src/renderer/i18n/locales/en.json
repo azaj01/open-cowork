@@ -134,7 +134,6 @@
     "getStarted": "Get Started",
     "saveSettings": "Save Settings",
     "openSettingsAction": "Open API Settings",
-    "proxyWarming": "Initializing service, first launch may take a moment...",
     "configRequiredActiveSet": "The current config set does not have usable credentials. Finish setup in API Settings first.",
     "testConnection": "Test Connection",
     "testingConnection": "Testing...",
@@ -165,10 +164,6 @@
       "server_error": "Service error. Please try again later",
       "network_error": "Network error. Check your connection",
       "ollama_not_running": "Cannot connect to Ollama. Please make sure Ollama is running (ollama serve).",
-      "proxy_boot_failed": "Local proxy failed to start. Please check your runtime environment",
-      "proxy_health_failed": "Local proxy health check failed. Please try again",
-      "proxy_upstream_auth_failed": "Upstream authentication failed. Please verify your API key",
-      "proxy_upstream_not_found": "Upstream URL or route was not found. Please verify your Base URL",
       "unknown": "Connection failed"
     },
     "guidance": {

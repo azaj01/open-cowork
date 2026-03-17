@@ -134,7 +134,6 @@
     "getStarted": "开始使用",
     "saveSettings": "保存设置",
     "openSettingsAction": "打开 API 设置",
-    "proxyWarming": "正在初始化服务，首次启动可能需要几秒...",
     "configRequiredActiveSet": "当前方案未配置可用凭证，请先在 API 设置中完成配置",
     "testConnection": "测试连接",
     "testingConnection": "测试中...",
@@ -165,10 +164,6 @@
       "server_error": "服务端错误，请稍后再试",
       "network_error": "网络连接失败，请检查网络或地址",
       "ollama_not_running": "无法连接 Ollama，请确认 Ollama 已启动（ollama serve）",
-      "proxy_boot_failed": "本地代理启动失败，请检查运行环境后重试",
-      "proxy_health_failed": "本地代理健康检查失败，请稍后重试",
-      "proxy_upstream_auth_failed": "上游服务鉴权失败，请检查 API Key",
-      "proxy_upstream_not_found": "上游服务地址或路由不存在，请检查 Base URL",
       "unknown": "连接失败"
     },
     "guidance": {

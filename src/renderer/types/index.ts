@@ -390,7 +390,6 @@ export type ServerEvent =
   | { type: 'skills.storageChanged'; payload: SkillsStorageChangeEvent }
   | { type: 'plugins.runtimeApplied'; payload: { sessionId: string; plugins: Array<{ name: string; path: string }> } }
   | { type: 'workdir.changed'; payload: { path: string } }
-  | { type: 'proxy.warmup'; payload: { status: 'warming' | 'ready' | 'failed' } }
   | { type: 'session.contextInfo'; payload: { sessionId: string; contextWindow: number } }
   | { type: 'navigate.to'; payload: { page: 'welcome' | 'settings' | 'session'; tab?: string; sessionId?: string } }
   | { type: 'native-theme.changed'; payload: { shouldUseDarkColors: boolean } }
@@ -531,10 +530,6 @@ export interface ApiTestResult {
     | 'server_error'
     | 'network_error'
     | 'ollama_not_running'
-    | 'proxy_boot_failed'
-    | 'proxy_health_failed'
-    | 'proxy_upstream_auth_failed'
-    | 'proxy_upstream_not_found'
     | 'unknown';
   details?: string;
 }
