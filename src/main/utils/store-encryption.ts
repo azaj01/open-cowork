@@ -2,14 +2,14 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import Store from 'electron-store';
+import Store, { type Options as StoreOptions } from 'electron-store';
 
 type Logger = (...args: unknown[]) => void;
 
-interface EncryptedStoreRotationOptions<T extends Record<string, unknown>> {
+interface EncryptedStoreRotationOptions<T extends Record<string, any>> {
   stableKey: string;
   legacyKeys: string[];
-  storeOptions: Record<string, unknown>;
+  storeOptions: StoreOptions<T> & { projectName?: string };
   logPrefix: string;
   log?: Logger;
   warn?: Logger;
@@ -73,7 +73,7 @@ export function getLegacyDerivedKeyBuffers(options: KeyMaterialOptions): Buffer[
   );
 }
 
-export function createEncryptedStoreWithKeyRotation<T extends Record<string, unknown>>(
+export function createEncryptedStoreWithKeyRotation<T extends Record<string, any>>(
   options: EncryptedStoreRotationOptions<T>
 ): Store<T> {
   const stableKey = options.stableKey;
@@ -81,7 +81,7 @@ export function createEncryptedStoreWithKeyRotation<T extends Record<string, unk
 
   try {
     return new Store<T>({
-      ...(options.storeOptions as Record<string, unknown>),
+      ...(options.storeOptions as StoreOptions<T>),
       encryptionKey: stableKey,
     });
   } catch (error) {
@@ -92,7 +92,7 @@ export function createEncryptedStoreWithKeyRotation<T extends Record<string, unk
     for (const legacyKey of legacyKeys) {
       try {
         const legacyStore = new Store<T>({
-          ...(options.storeOptions as Record<string, unknown>),
+          ...(options.storeOptions as StoreOptions<T>),
           encryptionKey: legacyKey,
         });
         const snapshot = legacyStore.store as T;
@@ -109,10 +109,10 @@ export function createEncryptedStoreWithKeyRotation<T extends Record<string, unk
         }
 
         const stableStore = new Store<T>({
-          ...(options.storeOptions as Record<string, unknown>),
+          ...(options.storeOptions as StoreOptions<T>),
           encryptionKey: stableKey,
         });
-        stableStore.set(snapshot as Record<string, unknown>);
+        stableStore.store = snapshot;
         return stableStore;
       } catch (legacyError) {
         if (!isLikelyKeyMismatch(legacyError)) {

@@ -292,15 +292,21 @@ export function applyPiModelRuntimeOverrides(
     && nextModel.reasoning
     && nextModel.api === 'openai-completions'
   ) {
+    const currentCompat = (nextModel.compat || {}) as Record<string, unknown>;
+    const currentReasoningEffortMap = (
+      currentCompat.reasoningEffortMap && typeof currentCompat.reasoningEffortMap === 'object'
+        ? currentCompat.reasoningEffortMap
+        : {}
+    ) as Record<string, string>;
     nextModel = {
       ...nextModel,
       compat: {
-        ...(nextModel.compat || {}),
+        ...currentCompat,
         supportsReasoningEffort: true,
         reasoningEffortMap: {
-          ...((nextModel.compat?.reasoningEffortMap as Record<string, string> | undefined) || {}),
+          ...currentReasoningEffortMap,
           off: 'none',
-        } as typeof nextModel.compat extends { reasoningEffortMap?: infer T } ? T : never,
+        },
       },
     } as typeof nextModel;
   }
