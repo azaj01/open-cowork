@@ -13,6 +13,7 @@
     "build:mcp": "node scripts/bundle-mcp.js",
     "commitlint": "commitlint --config commitlint.config.cjs",
     "download:node": "node scripts/download-node.js",
+    "postinstall": "node scripts/download-node.js && npm run rebuild",
     "prepare": "husky",
     "prepare:gui-tools": "node scripts/prepare-gui-tools.js",
     "prepare:python": "node scripts/prepare-python.js",
