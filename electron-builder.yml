@@ -96,6 +96,8 @@ mac:
   entitlementsInherit: resources/entitlements.mac.plist
   extendInfo:
     LSApplicationCategoryType: public.app-category.developer-tools
+    NSScreenCaptureUsageDescription: "Open Cowork needs screen recording access for GUI automation."
+    NSAccessibilityUsageDescription: "Open Cowork needs accessibility access for GUI automation."
   extraResources:
     - from: dist-mcp
       to: mcp

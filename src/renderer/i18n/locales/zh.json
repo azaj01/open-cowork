@@ -133,6 +133,8 @@
     "maxOutputTokensPlaceholder": "自动检测",
     "contextWindowHint": "留空则自动检测。仅在模型限制不正确时手动覆盖。",
     "saveFailed": "保存失败，请稍后重试",
+    "loadFailed": "配置加载失败，使用默认值 — 已保存的设置可能未显示。",
+    "diagnosisFailed": "诊断失败",
     "getStarted": "开始使用",
     "saveSettings": "保存设置",
     "openSettingsAction": "打开 API 设置",

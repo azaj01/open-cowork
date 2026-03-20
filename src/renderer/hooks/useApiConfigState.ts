@@ -836,7 +836,13 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
     enableThinking: Boolean(initialConfig?.enableThinking),
     discoveredModels: {},
     isLoadingConfig: true,
-    savedDraftSignature: '',
+    // Initialize from the bootstrap config so that any user edits made before the
+    // async load completes are correctly detected as unsaved changes.
+    savedDraftSignature: buildApiConfigDraftSignature(
+      initialBootstrap.snapshot.activeProfileKey,
+      initialBootstrap.snapshot.profiles,
+      Boolean(initialConfig?.enableThinking)
+    ),
     isSaving: false,
     isTesting: false,
     isRefreshingModels: false,
@@ -1114,8 +1120,7 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
     () => buildApiConfigDraftSignature(activeProfileKey, profiles, enableThinking),
     [activeProfileKey, profiles, enableThinking]
   );
-  const hasUnsavedChanges =
-    savedDraftSignature !== '' && currentDraftSignature !== savedDraftSignature;
+  const hasUnsavedChanges = currentDraftSignature !== savedDraftSignature;
 
   const applyLoadedState = useCallback(
     (config: AppConfig | null | undefined, loadedPresets: ProviderPresets) => {
@@ -1297,6 +1302,9 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
       } catch (loadError) {
         if (!cancelled) {
           console.error('Failed to load API config:', loadError);
+          // Show an error banner so the user knows the displayed values are fallbacks,
+          // not their actual saved settings.
+          dispatch({ type: 'SET_ERROR_KEY', key: 'api.loadFailed', values: {} });
           applyLoadedState(initialConfig, FALLBACK_PROVIDER_PRESETS);
         }
       } finally {
@@ -1458,7 +1466,7 @@ export function useApiConfigState(options: UseApiConfigStateOptions = {}) {
       });
       dispatch({ type: 'SET_DIAGNOSTIC_RESULT', payload: result });
     } catch (err) {
-      showErrorText((err as Error).message || 'Diagnosis failed');
+      showErrorText(err instanceof Error ? err.message : t('api.diagnosisFailed'));
     } finally {
       dispatch({ type: 'SET_IS_DIAGNOSING', payload: false });
     }
