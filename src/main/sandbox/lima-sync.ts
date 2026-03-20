@@ -456,8 +456,8 @@ export class LimaSync {
         stdout: result.stdout || '',
         stderr: result.stderr || '',
       };
-    } catch (error: any) {
-      throw new Error(error.message || String(error));
+    } catch (error: unknown) {
+      throw new Error(error instanceof Error ? error.message : String(error));
     }
   }
 

@@ -87,13 +87,13 @@ export class NativeExecutor implements SandboxExecutor {
     this.validatePath(cwd);
 
     // Block path traversal
-    if (/(?:^|[\s;|&])\.\.(?:[\s;|&\/\\]|$)/.test(command)) {
+    if (/(?:^|[\s;|&])\.\.(?:[\s;|&/\\]|$)/.test(command)) {
       throw new Error('Path traversal detected in command');
     }
 
     // Block dangerous patterns
     const dangerousPatterns = [
-      /rm\s+-rf?\s+[\/~]/i,
+      /rm\s+-rf?\s+[/~]/i,
       /dd\s+if=/i,
       /mkfs/i,
       />\s*\/dev\//i,
@@ -177,7 +177,7 @@ export class NativeExecutor implements SandboxExecutor {
       });
 
       proc.on('close', (code: number | null) => {
-        if (isWindows && args[args.length - 1]?.endsWith('.ps1')) { try { fs.unlinkSync(args[args.length - 1]); } catch {} }
+        if (isWindows && args[args.length - 1]?.endsWith('.ps1')) { try { fs.unlinkSync(args[args.length - 1]); } catch (_e) { /* ignore cleanup failure */ } }
         resolve({
           success: code === 0,
           stdout,
