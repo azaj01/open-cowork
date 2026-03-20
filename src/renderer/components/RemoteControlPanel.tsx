@@ -1,105 +1,35 @@
 /**
  * Remote Control Settings Panel
- * 远程控制设置面板 - 重新设计的现代化界面
+ * Composes sub-components for Feishu/Lark bot remote control configuration.
  */
 
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  Power,
-  Users,
-  MessageSquare,
-  Check,
-  Trash2,
-  Shield,
-  Loader2,
-  Copy,
-  ExternalLink,
-  Zap,
-  Settings2,
-  Smartphone,
-  Link2,
-  CheckCircle2,
-  AlertTriangle,
-} from 'lucide-react';
-import { formatAppDate } from '../utils/i18n-format';
+import { Check, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { GatewayControlCard } from './remote/GatewayControlCard';
+import { PairingRequestsSection } from './remote/PairingRequestsSection';
+import { ConfigStepNav } from './remote/ConfigStepNav';
+import { FeishuConfigStep } from './remote/FeishuConfigStep';
+import { ConnectionConfigStep } from './remote/ConnectionConfigStep';
+import { AdvancedConfigStep } from './remote/AdvancedConfigStep';
+import { AuthorizedUsersSection } from './remote/AuthorizedUsersSection';
+import { QuickStartGuide } from './remote/QuickStartGuide';
+import type {
+  GatewayStatus,
+  PairedUser,
+  PairingRequest,
+  RemoteConfig,
+  TunnelStatus,
+  ConfigStep,
+  LocalizedBanner,
+} from './remote/types';
 
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
-
-interface GatewayStatus {
-  running: boolean;
-  port?: number;
-  publicUrl?: string;
-  channels: Array<{ type: string; connected: boolean; error?: string }>;
-  activeSessions: number;
-  pendingPairings: number;
-}
-
-interface PairedUser {
-  userId: string;
-  userName?: string;
-  channelType: string;
-  pairedAt: number;
-  lastActiveAt: number;
-}
-
-interface PairingRequest {
-  code: string;
-  channelType: string;
-  userId: string;
-  userName?: string;
-  createdAt: number;
-  expiresAt: number;
-}
-
-interface RemoteConfig {
-  gateway: {
-    enabled: boolean;
-    port: number;
-    bind: string;
-    defaultWorkingDirectory?: string;
-    autoApproveSafeTools?: boolean;
-    tunnel?: {
-      enabled: boolean;
-      type: 'ngrok' | 'cloudflare' | 'frp';
-      ngrok?: {
-        authToken: string;
-        region?: string;
-      };
-    };
-    auth: {
-      mode: string;
-      token?: string;
-      requirePairing?: boolean;
-    };
-  };
-  channels: {
-    feishu?: {
-      appId: string;
-      appSecret: string;
-      useWebSocket?: boolean;
-      dm: {
-        policy: string;
-      };
-    };
-  };
-}
-
-interface TunnelStatus {
-  connected: boolean;
-  url: string | null;
-  provider: string;
-  error?: string;
-}
-
-// 配置步骤
-type ConfigStep = 'feishu' | 'connection' | 'advanced';
-type LocalizedBanner = { key?: string; text?: string | null };
 
 export function RemoteControlPanel({ isActive }: { isActive: boolean }) {
   const { i18n, t } = useTranslation();
 
-  // State
+  // Remote state
   const [isLoading, setIsLoading] = useState(true);
   const [status, setStatus] = useState<GatewayStatus | null>(null);
   const [, setConfig] = useState<RemoteConfig | null>(null);
@@ -124,11 +54,8 @@ export function RemoteControlPanel({ isActive }: { isActive: boolean }) {
   const [tunnelStatus, setTunnelStatus] = useState<TunnelStatus | null>(null);
   const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
 
-  // Load data
   useEffect(() => {
-    if (!isActive) {
-      return;
-    }
+    if (!isActive) return;
     loadData();
     const interval = setInterval(refreshStatus, 5000);
     return () => clearInterval(interval);
@@ -286,10 +213,9 @@ export function RemoteControlPanel({ isActive }: { isActive: boolean }) {
     setTimeout(() => setSuccess(null), 2000);
   }
 
-  // 检查配置完成度
   const isFeishuConfigured = !!(feishuAppId && feishuAppSecret);
   const isConnectionConfigured =
-    useLongConnection || (tunnelEnabled && ngrokAuthToken) || tunnelStatus?.connected;
+    useLongConnection || (tunnelEnabled && !!ngrokAuthToken) || !!tunnelStatus?.connected;
   const permissionSeparator = i18n.language.startsWith('zh') ? '、' : ', ';
   const permissionScopes = [
     'im:resource',
@@ -310,7 +236,7 @@ export function RemoteControlPanel({ isActive }: { isActive: boolean }) {
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
-      {/* 通知 */}
+      {/* Notification banners */}
       {error && (
         <div className="p-4 bg-error/10 border border-error/30 rounded-xl flex items-center gap-3">
           <AlertTriangle className="w-5 h-5 text-error flex-shrink-0" />
@@ -324,481 +250,65 @@ export function RemoteControlPanel({ isActive }: { isActive: boolean }) {
         </div>
       )}
 
-      {/* 主控制卡片 */}
-      <div className="relative overflow-hidden rounded-[2rem] border border-border-subtle bg-gradient-to-br from-background/80 to-background-secondary/80">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-accent/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
-        <div className="relative p-6">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-4">
-              <div
-                className={`p-3 rounded-2xl ${status?.running ? 'bg-success/10' : 'bg-surface-active'}`}
-              >
-                <Smartphone
-                  className={`w-8 h-8 ${status?.running ? 'text-success' : 'text-text-muted'}`}
-                />
-              </div>
-              <div>
-                <h2 className="text-xl font-semibold text-text-primary">{t('remote.title')}</h2>
-                <p className="text-sm text-text-secondary mt-0.5">
-                  {status?.running ? t('remote.statusRunning') : t('remote.statusStopped')}
-                </p>
-              </div>
-            </div>
+      <GatewayControlCard
+        status={status}
+        pairedUsers={pairedUsers}
+        pendingPairings={pendingPairings}
+        isTogglingGateway={isTogglingGateway}
+        isFeishuConfigured={isFeishuConfigured}
+        onToggle={toggleGateway}
+      />
 
-            <button
-              onClick={toggleGateway}
-              disabled={isTogglingGateway || !isFeishuConfigured}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium transition-all ${
-                status?.running
-                  ? 'bg-error hover:bg-error/90 text-white'
-                  : 'bg-accent hover:bg-accent/90 text-white'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              {isTogglingGateway ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Power className="w-4 h-4" />
-              )}
-              {status?.running ? t('remote.stopService') : t('remote.startService')}
-            </button>
-          </div>
+      <PairingRequestsSection
+        pendingPairings={pendingPairings}
+        onApprove={approvePairing}
+      />
 
-          {/* 状态指标 */}
-          {status?.running && (
-            <div className="grid grid-cols-3 gap-4 mt-6 pt-6 border-t border-border/50">
-              <div className="text-center p-3 rounded-xl bg-surface/50">
-                <div className="text-2xl font-bold text-accent">{status.activeSessions}</div>
-                <div className="text-xs text-text-muted mt-1">{t('remote.activeSessions')}</div>
-              </div>
-              <div className="text-center p-3 rounded-xl bg-surface/50">
-                <div className="text-2xl font-bold text-success">{pairedUsers.length}</div>
-                <div className="text-xs text-text-muted mt-1">{t('remote.authorizedUsers')}</div>
-              </div>
-              <div className="text-center p-3 rounded-xl bg-surface/50">
-                <div className="text-2xl font-bold text-warning">{pendingPairings.length}</div>
-                <div className="text-xs text-text-muted mt-1">{t('remote.pendingApprovals')}</div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      <ConfigStepNav
+        activeStep={activeStep}
+        isFeishuConfigured={isFeishuConfigured}
+        isConnectionConfigured={isConnectionConfigured}
+        onStepChange={setActiveStep}
+      />
 
-      {/* 配对请求 */}
-      {pendingPairings.length > 0 && (
-        <div className="p-5 rounded-2xl border-2 border-warning/30 bg-warning/5">
-          <h3 className="font-medium text-warning mb-4 flex items-center gap-2">
-            <Shield className="w-5 h-5" />
-            {t('remote.pairingRequests')}
-          </h3>
-          <div className="space-y-3">
-            {pendingPairings.map((request) => (
-              <div
-                key={`${request.channelType}-${request.userId}`}
-                className="flex items-center justify-between p-4 bg-surface rounded-xl"
-              >
-                <div>
-                  <div className="font-medium text-text-primary">
-                    {request.userName || t('remote.unknownUser')}
-                  </div>
-                  <div className="text-sm text-text-secondary mt-1">
-                    {t('remote.pairingCode')}:{' '}
-                    <span className="font-mono text-warning font-bold">{request.code}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => approvePairing(request)}
-                    className="p-2 rounded-lg bg-success/10 hover:bg-success/20 text-success transition-colors"
-                    title={t('remote.approve')}
-                  >
-                    <Check className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 配置步骤导航 */}
-      <div className="flex items-center gap-2 p-1 bg-surface rounded-xl">
-        {[
-          {
-            id: 'feishu',
-            label: t('remote.stepFeishu'),
-            icon: MessageSquare,
-            done: isFeishuConfigured,
-          },
-          {
-            id: 'connection',
-            label: t('remote.stepConnection'),
-            icon: Link2,
-            done: isConnectionConfigured,
-          },
-          { id: 'advanced', label: t('remote.stepAdvanced'), icon: Settings2, done: true },
-        ].map((step) => (
-          <button
-            key={step.id}
-            onClick={() => setActiveStep(step.id as ConfigStep)}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition-all ${
-              activeStep === step.id
-                ? 'bg-accent text-white'
-                : 'hover:bg-surface-hover text-text-secondary'
-            }`}
-          >
-            {step.done && activeStep !== step.id ? (
-              <CheckCircle2 className="w-4 h-4 text-success" />
-            ) : (
-              <step.icon className="w-4 h-4" />
-            )}
-            <span className="text-sm font-medium">{step.label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* 配置内容 */}
+      {/* Configuration content */}
       <div className="p-6 rounded-[2rem] border border-border-subtle bg-background/60">
-        {/* 步骤 1: 飞书配置 */}
         {activeStep === 'feishu' && (
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-lg font-medium text-text-primary mb-1">
-                {t('remote.feishuTitle')}
-              </h3>
-              <p className="text-sm text-text-secondary">{t('remote.feishuDesc')}</p>
-            </div>
-
-            <div className="grid gap-4">
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-2">App ID</label>
-                <input
-                  type="text"
-                  value={feishuAppId}
-                  onChange={(e) => setFeishuAppId(e.target.value)}
-                  className="w-full px-4 py-3 bg-surface-hover border border-border rounded-xl text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all"
-                  placeholder="cli_xxxxxxxxxxxxxxxx"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-2">
-                  App Secret
-                </label>
-                <input
-                  type="password"
-                  value={feishuAppSecret}
-                  onChange={(e) => setFeishuAppSecret(e.target.value)}
-                  className="w-full px-4 py-3 bg-surface-hover border border-border rounded-xl text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all"
-                  placeholder="••••••••••••••••"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-2">
-                  {t('remote.dmPolicy')}
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    {
-                      value: 'pairing',
-                      label: t('remote.policyPairing'),
-                      desc: t('remote.policyPairingDesc'),
-                    },
-                    {
-                      value: 'allowlist',
-                      label: t('remote.policyAllowlist'),
-                      desc: t('remote.policyAllowlistDesc'),
-                    },
-                    {
-                      value: 'open',
-                      label: t('remote.policyOpen'),
-                      desc: t('remote.policyOpenDesc'),
-                    },
-                  ].map((option) => (
-                    <button
-                      key={option.value}
-                      onClick={() => setFeishuDmPolicy(option.value)}
-                      className={`p-3 rounded-xl border-2 text-left transition-all ${
-                        feishuDmPolicy === option.value
-                          ? 'border-accent bg-accent/5'
-                          : 'border-border hover:border-accent/50'
-                      }`}
-                    >
-                      <div className="font-medium text-text-primary text-sm">{option.label}</div>
-                      <div className="text-xs text-text-muted mt-0.5">{option.desc}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <a
-              href="https://open.feishu.cn/app"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-sm text-accent hover:underline"
-            >
-              <ExternalLink className="w-4 h-4" />
-              {t('remote.openFeishu')}
-            </a>
-          </div>
+          <FeishuConfigStep
+            feishuAppId={feishuAppId}
+            feishuAppSecret={feishuAppSecret}
+            feishuDmPolicy={feishuDmPolicy}
+            onAppIdChange={setFeishuAppId}
+            onAppSecretChange={setFeishuAppSecret}
+            onDmPolicyChange={setFeishuDmPolicy}
+          />
         )}
-
-        {/* 步骤 2: 连接方式 */}
         {activeStep === 'connection' && (
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-lg font-medium text-text-primary mb-1">
-                {t('remote.connectionTitle')}
-              </h3>
-              <p className="text-sm text-text-secondary">{t('remote.connectionDesc')}</p>
-            </div>
-
-            {/* 长连接模式 - 推荐 */}
-            <div
-              onClick={() => setUseLongConnection(true)}
-              className={`p-5 rounded-xl border-2 cursor-pointer transition-all ${
-                useLongConnection
-                  ? 'border-success bg-success/5'
-                  : 'border-border hover:border-success/50'
-              }`}
-            >
-              <div className="flex items-start gap-4">
-                <div
-                  className={`p-2 rounded-lg ${useLongConnection ? 'bg-success/10' : 'bg-surface-active'}`}
-                >
-                  <Zap
-                    className={`w-6 h-6 ${useLongConnection ? 'text-success' : 'text-text-muted'}`}
-                  />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-text-primary">
-                      {t('remote.longConnection')}
-                    </span>
-                    <span className="px-2 py-0.5 text-xs rounded-full bg-success/10 text-success font-medium">
-                      {t('remote.recommended')}
-                    </span>
-                  </div>
-                  <p className="text-sm text-text-secondary mt-1">
-                    {t('remote.longConnectionDesc')}
-                  </p>
-                  <div className="flex items-center gap-4 mt-3 text-xs text-text-muted">
-                    <span className="flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-success" />{' '}
-                      {t('remote.noPublicInternet')}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-success" /> {t('remote.outOfBox')}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-success" />{' '}
-                      {t('remote.stableReliable')}
-                    </span>
-                  </div>
-                </div>
-                <div
-                  className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                    useLongConnection ? 'border-success bg-success' : 'border-border'
-                  }`}
-                >
-                  {useLongConnection && <Check className="w-3 h-3 text-white" />}
-                </div>
-              </div>
-            </div>
-
-            {/* Webhook 模式 */}
-            <div
-              onClick={() => setUseLongConnection(false)}
-              className={`p-5 rounded-xl border-2 cursor-pointer transition-all ${
-                !useLongConnection
-                  ? 'border-accent bg-accent/5'
-                  : 'border-border hover:border-accent/50'
-              }`}
-            >
-              <div className="flex items-start gap-4">
-                <div
-                  className={`p-2 rounded-lg ${!useLongConnection ? 'bg-accent/10' : 'bg-surface-active'}`}
-                >
-                  <Link2
-                    className={`w-6 h-6 ${!useLongConnection ? 'text-accent' : 'text-text-muted'}`}
-                  />
-                </div>
-                <div className="flex-1">
-                  <div className="font-medium text-text-primary">{t('remote.webhookMode')}</div>
-                  <p className="text-sm text-text-secondary mt-1">{t('remote.webhookDesc')}</p>
-                </div>
-                <div
-                  className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                    !useLongConnection ? 'border-accent bg-accent' : 'border-border'
-                  }`}
-                >
-                  {!useLongConnection && <Check className="w-3 h-3 text-white" />}
-                </div>
-              </div>
-
-              {/* Webhook URL 显示 */}
-              {!useLongConnection && (
-                <div className="mt-4 pt-4 border-t border-border/50 space-y-4">
-                  <div>
-                    <label className="block text-xs text-text-muted mb-1">
-                      {t('remote.localWebhookUrl')}
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 px-3 py-2 bg-surface-hover rounded-lg text-sm font-mono text-text-secondary truncate">
-                        http://127.0.0.1:{gatewayPort}/webhook/feishu
-                      </code>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          copyToClipboard(`http://127.0.0.1:${gatewayPort}/webhook/feishu`);
-                        }}
-                        className="p-2 rounded-lg hover:bg-surface-active transition-colors"
-                      >
-                        <Copy className="w-4 h-4 text-text-muted" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 内置 ngrok */}
-                  <div className="p-4 rounded-lg bg-surface-hover">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-sm font-medium text-text-primary">
-                        {t('remote.useBuiltInNgrok')}
-                      </span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setTunnelEnabled(!tunnelEnabled);
-                        }}
-                        className={`relative w-10 h-5 rounded-full transition-colors ${
-                          tunnelEnabled ? 'bg-accent' : 'bg-surface-active'
-                        }`}
-                      >
-                        <span
-                          className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                            tunnelEnabled ? 'left-5' : 'left-0.5'
-                          }`}
-                        />
-                      </button>
-                    </div>
-
-                    {tunnelEnabled && (
-                      <div>
-                        <input
-                          type="password"
-                          value={ngrokAuthToken}
-                          onChange={(e) => setNgrokAuthToken(e.target.value)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-text-primary focus:border-accent focus:outline-none"
-                          placeholder="ngrok authtoken"
-                        />
-                        <p className="text-xs text-text-muted mt-2">
-                          {t('remote.ngrokHelpPrefix')}{' '}
-                          <a
-                            href="https://ngrok.com"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-accent hover:underline"
-                          >
-                            ngrok.com
-                          </a>{' '}
-                          {t('remote.ngrokHelpSuffix')}
-                        </p>
-                      </div>
-                    )}
-
-                    {tunnelStatus?.connected && webhookUrl && (
-                      <div className="mt-3 p-2 rounded-lg bg-success/10">
-                        <div className="flex items-center gap-2 text-success text-sm">
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>{t('remote.tunnelConnected')}</span>
-                        </div>
-                        <code className="block mt-1 text-xs font-mono text-text-secondary truncate">
-                          {webhookUrl}
-                        </code>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {useLongConnection && (
-              <div className="p-4 rounded-xl bg-accent-muted border border-accent/20">
-                <p className="text-sm text-accent">{t('remote.longConnectionHint')}</p>
-              </div>
-            )}
-          </div>
+          <ConnectionConfigStep
+            useLongConnection={useLongConnection}
+            tunnelEnabled={tunnelEnabled}
+            ngrokAuthToken={ngrokAuthToken}
+            gatewayPort={gatewayPort}
+            tunnelStatus={tunnelStatus}
+            webhookUrl={webhookUrl}
+            onLongConnectionChange={setUseLongConnection}
+            onTunnelEnabledChange={setTunnelEnabled}
+            onNgrokAuthTokenChange={setNgrokAuthToken}
+            onCopy={copyToClipboard}
+          />
         )}
-
-        {/* 步骤 3: 高级设置 */}
         {activeStep === 'advanced' && (
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-lg font-medium text-text-primary mb-1">
-                {t('remote.advancedTitle')}
-              </h3>
-              <p className="text-sm text-text-secondary">{t('remote.advancedDesc')}</p>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-2">
-                  {t('remote.defaultWorkingDirectory')}
-                </label>
-                <input
-                  type="text"
-                  value={defaultWorkingDirectory}
-                  onChange={(e) => setDefaultWorkingDirectory(e.target.value)}
-                  className="w-full px-4 py-3 bg-surface-hover border border-border rounded-xl text-text-primary focus:border-accent focus:outline-none"
-                  placeholder={t('remote.defaultWorkingDirectoryPlaceholder')}
-                />
-                <p className="text-xs text-text-muted mt-1">
-                  {t('remote.defaultWorkingDirectoryHint')}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-2">
-                  {t('remote.gatewayPort')}
-                </label>
-                <input
-                  type="number"
-                  value={gatewayPort}
-                  onChange={(e) => setGatewayPort(parseInt(e.target.value) || 18789)}
-                  className="w-full px-4 py-3 bg-surface-hover border border-border rounded-xl text-text-primary focus:border-accent focus:outline-none"
-                  placeholder="18789"
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-4 rounded-xl bg-surface-hover">
-                <div>
-                  <div className="font-medium text-text-primary text-sm">
-                    {t('remote.autoApproveSafeTools')}
-                  </div>
-                  <p className="text-xs text-text-muted mt-0.5">
-                    {t('remote.autoApproveSafeToolsDesc')}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setAutoApproveSafeTools(!autoApproveSafeTools)}
-                  className={`relative w-10 h-5 rounded-full transition-colors ${
-                    autoApproveSafeTools ? 'bg-accent' : 'bg-surface-active'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                      autoApproveSafeTools ? 'left-5' : 'left-0.5'
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
-          </div>
+          <AdvancedConfigStep
+            defaultWorkingDirectory={defaultWorkingDirectory}
+            gatewayPort={gatewayPort}
+            autoApproveSafeTools={autoApproveSafeTools}
+            onWorkingDirectoryChange={setDefaultWorkingDirectory}
+            onGatewayPortChange={setGatewayPort}
+            onAutoApproveChange={setAutoApproveSafeTools}
+          />
         )}
 
-        {/* 保存按钮 */}
+        {/* Save button */}
         <div className="flex justify-end mt-6 pt-6 border-t border-border">
           <button
             onClick={saveConfig}
@@ -815,99 +325,12 @@ export function RemoteControlPanel({ isActive }: { isActive: boolean }) {
         </div>
       </div>
 
-      {/* 已授权用户 */}
-      {pairedUsers.length > 0 && (
-        <div className="p-6 rounded-[2rem] border border-border-subtle bg-background/60">
-          <h3 className="font-medium text-text-primary mb-4 flex items-center gap-2">
-            <Users className="w-5 h-5" />
-            {t('remote.authorizedUsersTitle', { count: pairedUsers.length })}
-          </h3>
-          <div className="space-y-2">
-            {pairedUsers.map((user) => (
-              <div
-                key={`${user.channelType}-${user.userId}`}
-                className="flex items-center justify-between p-3 rounded-xl bg-surface-hover"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center">
-                    <Users className="w-4 h-4 text-accent" />
-                  </div>
-                  <div>
-                    <div className="font-medium text-text-primary text-sm">
-                      {user.userName || user.userId.slice(0, 12) + '...'}
-                    </div>
-                    <div className="text-xs text-text-muted">
-                      {formatAppDate(user.lastActiveAt)}
-                    </div>
-                  </div>
-                </div>
-                <button
-                  onClick={() => revokePairing(user)}
-                  className="p-2 rounded-lg hover:bg-error/10 text-text-muted hover:text-error transition-colors"
-                  title={t('remote.revokeAccess')}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <AuthorizedUsersSection pairedUsers={pairedUsers} onRevoke={revokePairing} />
 
-      {/* 快速帮助 */}
-      <div className="p-5 rounded-[2rem] border border-border-subtle bg-background/55">
-        <h4 className="font-medium text-text-primary mb-3">{t('remote.quickStart')}</h4>
-        <ol className="space-y-2 text-sm text-text-secondary">
-          <li className="flex items-start gap-2">
-            <span className="w-5 h-5 rounded-full bg-accent/10 text-accent text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
-              1
-            </span>
-            <span>{t('remote.quickStartStep1')}</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="w-5 h-5 rounded-full bg-accent/10 text-accent text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
-              2
-            </span>
-            <span>{t('remote.quickStartStep2')}</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="w-5 h-5 rounded-full bg-accent/10 text-accent text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
-              3
-            </span>
-            <span>
-              {t('remote.quickStartStep3')}
-              {permissionScopes.map((scope, index) => (
-                <span key={scope}>
-                  <code className="px-1 py-0.5 bg-surface rounded ml-1">{scope}</code>
-                  {index < permissionScopes.length - 1 ? permissionSeparator : ''}
-                </span>
-              ))}
-            </span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="w-5 h-5 rounded-full bg-accent/10 text-accent text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
-              4
-            </span>
-            <span>{t('remote.quickStartStep4')}</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="w-5 h-5 rounded-full bg-accent/10 text-accent text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
-              5
-            </span>
-            <span>
-              {t('remote.quickStartStep5Prefix')}{' '}
-              <code className="px-1 py-0.5 bg-surface rounded">im.message.receive_v1</code>{' '}
-              {t('remote.quickStartStep5Suffix')}
-            </span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="w-5 h-5 rounded-full bg-accent/10 text-accent text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
-              6
-            </span>
-            <span>{t('remote.quickStartStep6')}</span>
-          </li>
-        </ol>
-      </div>
+      <QuickStartGuide
+        permissionScopes={permissionScopes}
+        permissionSeparator={permissionSeparator}
+      />
     </div>
   );
 }
