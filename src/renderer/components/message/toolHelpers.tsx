@@ -24,7 +24,7 @@ export function shortenPath(p: string): string {
 }
 
 /** Get compact label: tool action + key argument */
-export function getToolLabel(name: string, input: any): string {
+export function getToolLabel(name: string, input: Record<string, unknown>): string {
   const inp = input || {};
   // MCP tools
   if (name.startsWith('mcp__')) {

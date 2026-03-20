@@ -20,7 +20,7 @@ interface TodoWriteBlockProps {
 export const TodoWriteBlock = memo(function TodoWriteBlock({ block }: TodoWriteBlockProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
-  const todos: TodoItem[] = (block.input as any)?.todos || [];
+  const todos: TodoItem[] = (block.input as Record<string, unknown>)?.todos as TodoItem[] || [];
 
   const completedCount = todos.filter((item) => item.status === 'completed').length;
   const totalCount = todos.length;

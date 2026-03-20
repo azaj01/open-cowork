@@ -80,7 +80,7 @@ export const MessageCard = memo(function MessageCard({ message, isStreaming }: M
             ) : (
               contentBlocks.map((block, index) => (
                 <ContentBlockView
-                  key={(block as any).id || `block-${block.type}-${index}`}
+                  key={'id' in block ? (block as { id: string }).id : `block-${block.type}-${index}`}
                   block={block}
                   isUser={isUser}
                   isStreaming={isStreaming}
@@ -113,7 +113,7 @@ export const MessageCard = memo(function MessageCard({ message, isStreaming }: M
             }
             return (
               <ContentBlockView
-                key={(block as any).id || `block-${block.type}-${index}`}
+                key={'id' in block ? (block as { id: string }).id : `block-${block.type}-${index}`}
                 block={block}
                 isUser={isUser}
                 isStreaming={isStreaming}

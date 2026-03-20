@@ -37,7 +37,7 @@ export function ChatView() {
   const { continueSession, stopSession, isElectron } = useIPC();
   const [prompt, setPrompt] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeConnectors, setActiveConnectors] = useState<any[]>([]);
+  const [activeConnectors, setActiveConnectors] = useState<{ id: string; name: string; connected: boolean; toolCount: number }[]>([]);
   const [showConnectorLabel, setShowConnectorLabel] = useState(true);
   const headerRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -270,7 +270,7 @@ export function ChatView() {
         newImages.push({
           url,
           base64,
-          mediaType: resizedBlob.type as any,
+          mediaType: resizedBlob.type as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
         });
       } catch (err) {
         console.error('Failed to process pasted image:', err);
@@ -489,7 +489,7 @@ export function ChatView() {
       const loadConnectors = async () => {
         try {
           const statuses = await window.electronAPI.mcp.getServerStatus();
-          const active = statuses?.filter((s: any) => s.connected && s.toolCount > 0) || [];
+          const active = (statuses as Array<{ id: string; name: string; connected: boolean; toolCount: number }>)?.filter((s) => s.connected && s.toolCount > 0) || [];
           setActiveConnectors(active);
         } catch (err) {
           console.error('Failed to load MCP connectors:', err);
@@ -554,7 +554,7 @@ export function ChatView() {
           type: 'image',
           source: {
             type: 'base64',
-            media_type: img.mediaType as any,
+            media_type: img.mediaType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
             data: img.base64,
           },
         });
