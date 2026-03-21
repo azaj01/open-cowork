@@ -15,6 +15,13 @@ vi.mock('electron', () => {
   };
 });
 
+vi.mock('../src/main/config/config-store', () => ({
+  configStore: {
+    get: () => undefined,
+    getAll: () => ({}),
+  },
+}));
+
 vi.mock('../src/main/claude/agent-runner', () => ({
   ClaudeAgentRunner: class {
     run = vi.fn();
@@ -30,7 +37,10 @@ vi.mock('../src/main/mcp/mcp-config-store', () => ({
 }));
 
 import { SessionManager } from '../src/main/session/session-manager';
-import { buildTitlePrompt, getDefaultTitleFromPrompt } from '../src/main/session/session-title-utils';
+import {
+  buildTitlePrompt,
+  getDefaultTitleFromPrompt,
+} from '../src/main/session/session-title-utils';
 import { buildScheduledTaskTitle } from '../src/shared/schedule/task-title';
 
 describe('SessionManager scheduled title generation', () => {

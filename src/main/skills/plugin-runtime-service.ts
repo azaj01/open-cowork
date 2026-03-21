@@ -15,6 +15,7 @@ import type {
 import { log, logError } from '../utils/logger';
 import { isPathWithinRoot } from '../tools/path-containment';
 import { getDefaultShell } from '../utils/shell-resolver';
+import { withRetry } from '../utils/retry';
 import { pluginRegistryStore } from './plugin-registry-store';
 import { PluginCatalogService } from './plugin-catalog-service';
 
@@ -156,8 +157,8 @@ export class PluginRuntimeService {
     const runtimePath = this.getRuntimePath(pluginId);
     const componentCounts = this.detectComponentCounts(pluginRootPath, sourceManifest);
 
-    fs.rmSync(sourcePath, { recursive: true, force: true });
-    fs.rmSync(runtimePath, { recursive: true, force: true });
+    await this.removePathWithRetries(sourcePath);
+    await this.removePathWithRetries(runtimePath);
     this.copyDirectory(pluginRootPath, sourcePath);
 
     const now = Date.now();
@@ -266,8 +267,8 @@ export class PluginRuntimeService {
     log(
       `[PluginRuntime] Removing plugin files: ${plugin.name} (${pluginId}), source=${plugin.sourcePath}, runtime=${plugin.runtimePath}`
     );
-    fs.rmSync(plugin.sourcePath, { recursive: true, force: true });
-    fs.rmSync(plugin.runtimePath, { recursive: true, force: true });
+    await this.removePathWithRetries(plugin.sourcePath);
+    await this.removePathWithRetries(plugin.runtimePath);
     const success = pluginRegistryStore.delete(pluginId);
     log(`[PluginRuntime] Uninstall completed: ${plugin.name} (${pluginId}) success=${success}`);
     return { success };
@@ -275,7 +276,9 @@ export class PluginRuntimeService {
 
   async getEnabledRuntimePlugins(): Promise<InstalledPlugin[]> {
     const plugins = this.listInstalled().filter(
-      (plugin) => plugin.enabled && this.hasAnyEnabledComponent(plugin.componentsEnabled, plugin.componentCounts)
+      (plugin) =>
+        plugin.enabled &&
+        this.hasAnyEnabledComponent(plugin.componentsEnabled, plugin.componentCounts)
     );
 
     const ready: InstalledPlugin[] = [];
@@ -290,7 +293,10 @@ export class PluginRuntimeService {
     return ready;
   }
 
-  private static async defaultCommandRunner(command: string, args: string[]): Promise<CommandOutput> {
+  private static async defaultCommandRunner(
+    command: string,
+    args: string[]
+  ): Promise<CommandOutput> {
     // Enrich PATH for packaged app (same strategy as agent-runner)
     const env = { ...process.env };
     if (process.platform === 'darwin' || process.platform === 'linux') {
@@ -303,13 +309,15 @@ export class PluginRuntimeService {
           timeout: 3000,
         }).trim();
         if (shellOutput) env.PATH = shellOutput;
-      } catch { /* use process.env.PATH */ }
+      } catch {
+        /* use process.env.PATH */
+      }
     } else if (process.platform === 'win32') {
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { execSync } = require('child_process');
         const winPath = execSync(
-          'powershell.exe -NoProfile -Command "[Environment]::GetEnvironmentVariable(\'Path\', \'User\') + \';\' + [Environment]::GetEnvironmentVariable(\'Path\', \'Machine\')"',
+          "powershell.exe -NoProfile -Command \"[Environment]::GetEnvironmentVariable('Path', 'User') + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine')\"",
           { encoding: 'utf-8', timeout: 5000 }
         ).trim();
         if (winPath) {
@@ -317,13 +325,15 @@ export class PluginRuntimeService {
           const currentPaths = (env.PATH || '').split(';').filter((p: string) => p.trim());
           const allPaths = [...winPaths];
           for (const p of currentPaths) {
-            if (!allPaths.some(ep => ep.toLowerCase() === p.toLowerCase())) {
+            if (!allPaths.some((ep) => ep.toLowerCase() === p.toLowerCase())) {
               allPaths.push(p);
             }
           }
           env.PATH = allPaths.join(';');
         }
-      } catch { /* use process.env.PATH */ }
+      } catch {
+        /* use process.env.PATH */
+      }
     }
     const result = await execFileAsync(command, args, {
       env,
@@ -344,7 +354,9 @@ export class PluginRuntimeService {
     } catch (error) {
       const code = (error as { code?: string }).code;
       if (code === 'ENOENT') {
-        throw new Error('Failed to install plugin: claude command not found. Please install Claude Code CLI first.');
+        throw new Error(
+          'Failed to install plugin: claude command not found. Please install Claude Code CLI first.'
+        );
       }
 
       const stderr = (error as { stderr?: string }).stderr?.trim();
@@ -357,19 +369,25 @@ export class PluginRuntimeService {
     const installed = await this.listInstalledPluginsFromCli();
     log(`[PluginRuntime] Installed plugins reported by Claude CLI: ${installed.length}`);
     const record =
-      installed.find((plugin) => plugin.id === pluginId)
-      ?? installed.find((plugin) => plugin.id?.toLowerCase() === pluginId.toLowerCase());
+      installed.find((plugin) => plugin.id === pluginId) ??
+      installed.find((plugin) => plugin.id?.toLowerCase() === pluginId.toLowerCase());
 
     if (!record?.installPath) {
-      const availableIds = installed.map((plugin) => plugin.id).filter((id): id is string => Boolean(id));
-      log(`[PluginRuntime] installPath resolution failed for ${pluginId}, availableIds=${JSON.stringify(availableIds)}`);
+      const availableIds = installed
+        .map((plugin) => plugin.id)
+        .filter((id): id is string => Boolean(id));
+      log(
+        `[PluginRuntime] installPath resolution failed for ${pluginId}, availableIds=${JSON.stringify(availableIds)}`
+      );
       throw new Error(`Failed to install plugin: installPath not found for ${pluginId}`);
     }
 
     const pluginRootPath = record.installPath;
     log(`[PluginRuntime] Resolved installPath from Claude CLI: ${pluginId} -> ${pluginRootPath}`);
     if (!fs.existsSync(pluginRootPath) || !fs.statSync(pluginRootPath).isDirectory()) {
-      throw new Error(`Failed to install plugin: installPath is not a directory (${pluginRootPath})`);
+      throw new Error(
+        `Failed to install plugin: installPath is not a directory (${pluginRootPath})`
+      );
     }
 
     return pluginRootPath;
@@ -392,7 +410,9 @@ export class PluginRuntimeService {
 
     let parsed: ClaudePluginListOutput | ClaudeInstalledPluginRecord[];
     try {
-      parsed = JSON.parse(commandOutput.stdout) as ClaudePluginListOutput | ClaudeInstalledPluginRecord[];
+      parsed = JSON.parse(commandOutput.stdout) as
+        | ClaudePluginListOutput
+        | ClaudeInstalledPluginRecord[];
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`Failed to parse Claude plugin list JSON: ${message}`);
@@ -418,8 +438,13 @@ export class PluginRuntimeService {
     return plugin.pluginId ?? this.extractPluginId(plugin.installCommand);
   }
 
-  private resolveCatalogPlugin(catalog: PluginCatalogItemV2[], loweredRequested: string): PluginCatalogItemV2 | null {
-    const byExactPluginId = catalog.find((plugin) => this.getCatalogPluginId(plugin)?.toLowerCase() === loweredRequested);
+  private resolveCatalogPlugin(
+    catalog: PluginCatalogItemV2[],
+    loweredRequested: string
+  ): PluginCatalogItemV2 | null {
+    const byExactPluginId = catalog.find(
+      (plugin) => this.getCatalogPluginId(plugin)?.toLowerCase() === loweredRequested
+    );
     if (byExactPluginId) {
       return byExactPluginId;
     }
@@ -448,7 +473,9 @@ export class PluginRuntimeService {
       const candidates = byName
         .map((plugin) => this.getCatalogPluginId(plugin))
         .filter((value): value is string => Boolean(value));
-      throw new Error(`Multiple plugins share this name. Please install by plugin id: ${candidates.join(', ')}`);
+      throw new Error(
+        `Multiple plugins share this name. Please install by plugin id: ${candidates.join(', ')}`
+      );
     }
 
     return null;
@@ -460,9 +487,11 @@ export class PluginRuntimeService {
       return;
     }
 
-    fs.rmSync(plugin.runtimePath, { recursive: true, force: true });
+    await this.removePathWithRetries(plugin.runtimePath);
 
-    const active = plugin.enabled && this.hasAnyEnabledComponent(plugin.componentsEnabled, plugin.componentCounts);
+    const active =
+      plugin.enabled &&
+      this.hasAnyEnabledComponent(plugin.componentsEnabled, plugin.componentCounts);
     if (!active) {
       return;
     }
@@ -471,13 +500,16 @@ export class PluginRuntimeService {
 
     const sourceManifest = this.readManifest(plugin.sourcePath);
     const runtimeManifest = this.buildRuntimeManifest(plugin, sourceManifest);
-    this.pruneDisabledComponents(plugin, sourceManifest);
+    await this.pruneDisabledComponents(plugin, sourceManifest);
     this.writeRuntimeManifest(plugin.runtimePath, runtimeManifest);
 
     log(`[PluginRuntime] Materialized runtime plugin: ${plugin.name} (${plugin.pluginId})`);
   }
 
-  private buildRuntimeManifest(plugin: InstalledPlugin, sourceManifest: PluginManifest | null): PluginManifest {
+  private buildRuntimeManifest(
+    plugin: InstalledPlugin,
+    sourceManifest: PluginManifest | null
+  ): PluginManifest {
     const metadata: PluginManifest = sourceManifest ? { ...sourceManifest } : {};
     metadata.name = plugin.name;
     metadata.version = plugin.version ?? metadata.version ?? '0.1.0';
@@ -502,40 +534,47 @@ export class PluginRuntimeService {
     return metadata;
   }
 
-  private pruneDisabledComponents(plugin: InstalledPlugin, sourceManifest: PluginManifest | null): void {
+  private async pruneDisabledComponents(
+    plugin: InstalledPlugin,
+    sourceManifest: PluginManifest | null
+  ): Promise<void> {
     if (!this.isRuntimeComponentEnabled(plugin, 'skills')) {
-      this.removeRelativePath(plugin.runtimePath, './skills');
+      await this.removeRelativePath(plugin.runtimePath, './skills');
     }
 
     if (!this.isRuntimeComponentEnabled(plugin, 'commands')) {
-      for (const componentPath of this.resolveComponentPaths(sourceManifest?.commands, ['./commands'])) {
-        this.removeRelativePath(plugin.runtimePath, componentPath);
+      for (const componentPath of this.resolveComponentPaths(sourceManifest?.commands, [
+        './commands',
+      ])) {
+        await this.removeRelativePath(plugin.runtimePath, componentPath);
       }
     }
 
     if (!this.isRuntimeComponentEnabled(plugin, 'agents')) {
-      for (const componentPath of this.resolveComponentPaths(sourceManifest?.agents, ['./agents'])) {
-        this.removeRelativePath(plugin.runtimePath, componentPath);
+      for (const componentPath of this.resolveComponentPaths(sourceManifest?.agents, [
+        './agents',
+      ])) {
+        await this.removeRelativePath(plugin.runtimePath, componentPath);
       }
     }
 
     if (!this.isRuntimeComponentEnabled(plugin, 'hooks')) {
       if (typeof sourceManifest?.hooks === 'string') {
-        this.removeRelativePath(plugin.runtimePath, sourceManifest.hooks);
+        await this.removeRelativePath(plugin.runtimePath, sourceManifest.hooks);
       } else {
-        this.removeRelativePath(plugin.runtimePath, './hooks/hooks.json');
+        await this.removeRelativePath(plugin.runtimePath, './hooks/hooks.json');
       }
-      this.removeRelativePath(plugin.runtimePath, './hooks');
-      this.removeRelativePath(plugin.runtimePath, './hooks-handlers');
+      await this.removeRelativePath(plugin.runtimePath, './hooks');
+      await this.removeRelativePath(plugin.runtimePath, './hooks-handlers');
     }
 
     if (!this.isRuntimeComponentEnabled(plugin, 'mcp')) {
       if (typeof sourceManifest?.mcpServers === 'string') {
-        this.removeRelativePath(plugin.runtimePath, sourceManifest.mcpServers);
+        await this.removeRelativePath(plugin.runtimePath, sourceManifest.mcpServers);
       } else {
-        this.removeRelativePath(plugin.runtimePath, './.mcp.json');
+        await this.removeRelativePath(plugin.runtimePath, './.mcp.json');
       }
-      this.removeRelativePath(plugin.runtimePath, './mcp');
+      await this.removeRelativePath(plugin.runtimePath, './mcp');
     }
   }
 
@@ -546,11 +585,20 @@ export class PluginRuntimeService {
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
   }
 
-  private detectComponentCounts(pluginRootPath: string, manifest: PluginManifest | null): PluginComponentCounts {
+  private detectComponentCounts(
+    pluginRootPath: string,
+    manifest: PluginManifest | null
+  ): PluginComponentCounts {
     const counts = cloneCounts(EMPTY_COUNTS);
     counts.skills = this.countSkills(pluginRootPath);
-    counts.commands = this.countMarkdownComponent(pluginRootPath, this.resolveComponentPaths(manifest?.commands, ['./commands']));
-    counts.agents = this.countMarkdownComponent(pluginRootPath, this.resolveComponentPaths(manifest?.agents, ['./agents']));
+    counts.commands = this.countMarkdownComponent(
+      pluginRootPath,
+      this.resolveComponentPaths(manifest?.commands, ['./commands'])
+    );
+    counts.agents = this.countMarkdownComponent(
+      pluginRootPath,
+      this.resolveComponentPaths(manifest?.agents, ['./agents'])
+    );
     counts.hooks = this.countHooks(pluginRootPath, manifest);
     counts.mcp = this.countMcp(pluginRootPath, manifest);
     return counts;
@@ -589,9 +637,7 @@ export class PluginRuntimeService {
     }
 
     const hookPaths =
-      typeof manifest?.hooks === 'string'
-        ? [manifest.hooks]
-        : ['./hooks/hooks.json'];
+      typeof manifest?.hooks === 'string' ? [manifest.hooks] : ['./hooks/hooks.json'];
 
     for (const hookPath of hookPaths) {
       const absolutePath = this.resolveSafePath(pluginRootPath, hookPath);
@@ -608,9 +654,7 @@ export class PluginRuntimeService {
     }
 
     const mcpPaths =
-      typeof manifest?.mcpServers === 'string'
-        ? [manifest.mcpServers]
-        : ['./.mcp.json'];
+      typeof manifest?.mcpServers === 'string' ? [manifest.mcpServers] : ['./.mcp.json'];
 
     for (const mcpPath of mcpPaths) {
       const absolutePath = this.resolveSafePath(pluginRootPath, mcpPath);
@@ -621,7 +665,9 @@ export class PluginRuntimeService {
     return 0;
   }
 
-  private getDefaultComponentState(componentCounts: PluginComponentCounts): PluginComponentEnabledState {
+  private getDefaultComponentState(
+    componentCounts: PluginComponentCounts
+  ): PluginComponentEnabledState {
     return {
       skills: componentCounts.skills > 0,
       commands: componentCounts.commands > 0,
@@ -640,11 +686,17 @@ export class PluginRuntimeService {
     );
   }
 
-  private isRuntimeComponentEnabled(plugin: InstalledPlugin, component: PluginComponentKind): boolean {
+  private isRuntimeComponentEnabled(
+    plugin: InstalledPlugin,
+    component: PluginComponentKind
+  ): boolean {
     return plugin.componentsEnabled[component] && plugin.componentCounts[component] > 0;
   }
 
-  private resolveComponentPaths(value: string | string[] | undefined, fallback: string[]): string[] {
+  private resolveComponentPaths(
+    value: string | string[] | undefined,
+    fallback: string[]
+  ): string[] {
     if (!value) {
       return fallback;
     }
@@ -658,7 +710,12 @@ export class PluginRuntimeService {
       throw new Error('Path traversal detected');
     }
     const normalized = relativePath.trim().replace(/\\/g, '/').replace(/^\.\//, '');
-    if (!normalized || normalized.startsWith('/') || normalized.startsWith('../') || normalized.includes('/../')) {
+    if (
+      !normalized ||
+      normalized.startsWith('/') ||
+      normalized.startsWith('../') ||
+      normalized.includes('/../')
+    ) {
       return null;
     }
     return path.join(rootPath, normalized);
@@ -679,13 +736,83 @@ export class PluginRuntimeService {
     }
   }
 
-  private removeRelativePath(rootPath: string, relativePath: string): void {
+  private async removeRelativePath(rootPath: string, relativePath: string): Promise<void> {
     const absolutePath = this.resolveSafePath(rootPath, relativePath);
     if (!absolutePath) {
       return;
     }
-    if (fs.existsSync(absolutePath)) {
-      fs.rmSync(absolutePath, { recursive: true, force: true });
+    await this.removePathWithRetries(absolutePath);
+  }
+
+  private async removePathWithRetries(targetPath: string): Promise<void> {
+    try {
+      await this.ensurePathRemoved(targetPath);
+    } catch (error) {
+      if (!fs.existsSync(targetPath)) {
+        return;
+      }
+
+      const movedPath = this.movePathToTrash(targetPath);
+      if (!movedPath) {
+        throw error;
+      }
+
+      try {
+        fs.rmSync(movedPath, { recursive: true, force: true });
+      } catch (cleanupError) {
+        logError(
+          `[PluginRuntime] Failed to fully delete moved-aside path: ${movedPath}`,
+          cleanupError
+        );
+      }
+    }
+  }
+
+  private async ensurePathRemoved(targetPath: string): Promise<void> {
+    await withRetry(
+      async () => {
+        if (!fs.existsSync(targetPath)) {
+          return;
+        }
+
+        fs.rmSync(targetPath, { recursive: true, force: true });
+
+        if (fs.existsSync(targetPath)) {
+          const error = new Error(`Path still exists after removal: ${targetPath}`) as Error & {
+            code?: string;
+          };
+          error.code = 'ENOTEMPTY';
+          throw error;
+        }
+      },
+      {
+        maxRetries: 5,
+        delayMs: 25,
+        backoffMultiplier: 2,
+        shouldRetry: (error) => {
+          const code = (error as Error & { code?: string }).code;
+          return code === 'EBUSY' || code === 'EPERM' || code === 'ENOTEMPTY';
+        },
+      }
+    );
+  }
+
+  private movePathToTrash(targetPath: string): string | null {
+    if (!fs.existsSync(targetPath)) {
+      return null;
+    }
+
+    try {
+      const trashRoot = path.join(this.getPluginsRootPath(), '.trash');
+      fs.mkdirSync(trashRoot, { recursive: true });
+
+      const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const trashPath = path.join(trashRoot, `${path.basename(targetPath)}-${uniqueSuffix}`);
+      fs.renameSync(targetPath, trashPath);
+      return trashPath;
+    } catch (error) {
+      logError(`[PluginRuntime] Failed to move path to trash: ${targetPath}`, error);
+      return null;
     }
   }
 
