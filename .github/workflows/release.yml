@@ -21,7 +21,7 @@ jobs:
           cache: npm
 
       - name: Cache Electron
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/Library/Caches/electron
           key: electron-mac-${{ hashFiles('package-lock.json') }}
@@ -79,7 +79,7 @@ jobs:
           cache: npm
 
       - name: Cache Electron
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/AppData/Local/electron/Cache
           key: electron-win-${{ hashFiles('package-lock.json') }}

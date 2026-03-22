@@ -59,14 +59,14 @@ jobs:
           cache: npm
 
       - name: Cache Electron
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/Library/Caches/electron
           key: electron-mac-${{ hashFiles('package-lock.json') }}
           restore-keys: electron-mac-
 
       - name: Cache Node binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: resources/node/darwin-arm64
           key: node-darwin-arm64-v22.22.0
@@ -125,14 +125,14 @@ jobs:
           cache: npm
 
       - name: Cache Electron
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/AppData/Local/electron/Cache
           key: electron-win-${{ hashFiles('package-lock.json') }}
           restore-keys: electron-win-
 
       - name: Cache Node binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: resources/node/win32-x64
           key: node-win32-x64-v22.22.0
