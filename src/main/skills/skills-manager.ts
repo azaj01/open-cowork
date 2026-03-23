@@ -20,6 +20,25 @@ import type { DatabaseInstance } from '../db/database';
 import { log, logError, logWarn } from '../utils/logger';
 import { isPathWithinRoot } from '../tools/path-containment';
 
+/**
+ * Check if a path is a dangling symlink (symlink whose target no longer exists).
+ */
+function isDanglingSymlink(filePath: string): boolean {
+  try {
+    const lstat = fs.lstatSync(filePath);
+    if (!lstat.isSymbolicLink()) return false;
+    // Symlink exists — check if the target is reachable
+    try {
+      fs.statSync(filePath);
+      return false; // target exists, not dangling
+    } catch {
+      return true; // target unreachable
+    }
+  } catch {
+    return false; // path itself doesn't exist
+  }
+}
+
 interface McpServerConfig {
   command: string;
   args?: string[];
@@ -58,10 +77,9 @@ export interface SetGlobalSkillsPathResult {
   skippedCount: number;
 }
 
-
 /**
  * SkillsManager - Manages skill loading and MCP server lifecycle
- * 
+ *
  * Skills loading priority:
  * 1. Project-level: <project>/.skills/ or <project>/skills/
  * 2. Global: <userData>/claude/skills/ (includes ~/.claude/skills read-only)
@@ -104,7 +122,18 @@ export class SkillsManager {
 
         for (const dir of skillDirs) {
           const skillPath = path.join(builtinSkillsPath, dir);
-          const stat = fs.statSync(skillPath);
+
+          if (isDanglingSymlink(skillPath)) {
+            logWarn(`[Skills] Skipping dangling symlink in built-in skills: ${skillPath}`);
+            continue;
+          }
+
+          let stat: fs.Stats;
+          try {
+            stat = fs.statSync(skillPath);
+          } catch {
+            continue;
+          }
 
           if (!stat.isDirectory()) continue;
 
@@ -192,7 +221,7 @@ export class SkillsManager {
     if (configuredPath) {
       const resolved = path.resolve(configuredPath);
       const allowedBases = [app.getPath('userData'), app.getPath('home'), process.cwd()];
-      const isWithinAllowed = allowedBases.some(base => isPathWithinRoot(resolved, base));
+      const isWithinAllowed = allowedBases.some((base) => isPathWithinRoot(resolved, base));
       if (!isWithinAllowed) {
         throw new Error(`Skills path outside allowed directories: ${resolved}`);
       }
@@ -208,7 +237,9 @@ export class SkillsManager {
       return preferredPath;
     } catch (error) {
       if (preferredPath !== fallbackPath) {
-        logWarn(`[Skills] Configured skills path is unavailable, fallback to default: ${preferredPath}`);
+        logWarn(
+          `[Skills] Configured skills path is unavailable, fallback to default: ${preferredPath}`
+        );
         this.setConfiguredGlobalSkillsPathFn?.('');
         this.emitStorageEvent({
           path: fallbackPath,
@@ -346,6 +377,30 @@ export class SkillsManager {
     }
   }
 
+  /**
+   * Remove dangling symlinks from a directory (e.g. leftover links to a
+   * previous app bundle after an upgrade).
+   */
+  private cleanDanglingSymlinks(dir: string): void {
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      return; // directory unreadable — nothing to clean
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry);
+      if (isDanglingSymlink(entryPath)) {
+        try {
+          fs.unlinkSync(entryPath);
+          log(`[Skills] Cleaned up dangling symlink: ${entryPath}`);
+        } catch (err) {
+          logWarn(`[Skills] Could not remove dangling symlink ${entryPath}: ${err}`);
+        }
+      }
+    }
+  }
+
   private getUserSkillsPath(): string {
     return path.join(app.getPath('home'), '.claude', 'skills');
   }
@@ -358,11 +413,35 @@ export class SkillsManager {
 
     const entries = fs.readdirSync(userSkillsPath, { withFileTypes: true });
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
+      // Dirent.isDirectory() returns false for symlinks; check symlinks separately
       const sourcePath = path.join(userSkillsPath, entry.name);
+      if (entry.isSymbolicLink()) {
+        if (isDanglingSymlink(sourcePath)) {
+          logWarn(`[Skills] Skipping dangling symlink in user skills: ${sourcePath}`);
+          continue;
+        }
+        // Valid symlink — resolve to check if it's a directory
+        try {
+          if (!fs.statSync(sourcePath).isDirectory()) continue;
+        } catch {
+          continue;
+        }
+      } else if (!entry.isDirectory()) {
+        continue;
+      }
+
       const targetPath = path.join(globalSkillsPath, entry.name);
 
-      if (fs.existsSync(targetPath)) {
+      // Clean up dangling symlinks at the target before re-importing
+      if (isDanglingSymlink(targetPath)) {
+        try {
+          fs.unlinkSync(targetPath);
+          logWarn(`[Skills] Removed dangling symlink at target: ${targetPath}`);
+        } catch (unlinkErr) {
+          logError(`[Skills] Failed to remove dangling symlink: ${targetPath}`, unlinkErr);
+          continue;
+        }
+      } else if (fs.existsSync(targetPath)) {
         continue;
       }
 
@@ -384,12 +463,9 @@ export class SkillsManager {
   async loadProjectSkills(projectPath: string): Promise<Skill[]> {
     const skills: Skill[] = [];
     this.clearSkillsBySource('project');
-    
+
     // Check for .skills/ or skills/ directory
-    const skillsDirs = [
-      path.join(projectPath, '.skills'),
-      path.join(projectPath, 'skills'),
-    ];
+    const skillsDirs = [path.join(projectPath, '.skills'), path.join(projectPath, 'skills')];
 
     for (const skillsDir of skillsDirs) {
       if (fs.existsSync(skillsDir) && fs.statSync(skillsDir).isDirectory()) {
@@ -411,10 +487,15 @@ export class SkillsManager {
       fs.mkdirSync(globalSkillsPath, { recursive: true });
     }
 
+    // Proactively clean up dangling symlinks left by previous app versions
+    this.cleanDanglingSymlinks(globalSkillsPath);
+
     await this.importUserSkills(globalSkillsPath);
     const signature = this.computeStorageSignature(globalSkillsPath);
     if (this.globalSkillsLoaded && signature === this.loadedGlobalSkillsSignature) {
-      return Array.from(this.loadedSkills.values()).filter((skill) => skill.id.startsWith('global-'));
+      return Array.from(this.loadedSkills.values()).filter((skill) =>
+        skill.id.startsWith('global-')
+      );
     }
 
     this.clearSkillsBySource('global');
@@ -484,7 +565,19 @@ export class SkillsManager {
 
       for (const entry of entries) {
         const entryPath = path.join(dir, entry);
-        const stat = fs.statSync(entryPath);
+
+        // Skip dangling symlinks (e.g. leftover links to a previous app bundle)
+        if (isDanglingSymlink(entryPath)) {
+          logWarn(`[Skills] Skipping dangling symlink: ${entryPath}`);
+          continue;
+        }
+
+        let stat: fs.Stats;
+        try {
+          stat = fs.statSync(entryPath);
+        } catch {
+          continue; // skip entries that can't be stat'd
+        }
 
         // Check if it's a directory with SKILL.md
         if (stat.isDirectory()) {
@@ -552,17 +645,17 @@ export class SkillsManager {
 
     // 2. Add global skills
     const globalSkills = await this.loadGlobalSkills();
-    skills.push(...globalSkills.filter(s => s.enabled));
+    skills.push(...globalSkills.filter((s) => s.enabled));
 
     // 3. Add project skills (highest priority, can override)
     if (projectPath) {
       const projectSkills = await this.loadProjectSkills(projectPath);
-      
+
       // Project skills can override global/builtin by name
       for (const projectSkill of projectSkills) {
         if (!projectSkill.enabled) continue;
-        
-        const existingIndex = skills.findIndex(s => s.name === projectSkill.name);
+
+        const existingIndex = skills.findIndex((s) => s.name === projectSkill.name);
         if (existingIndex >= 0) {
           skills[existingIndex] = projectSkill;
         } else {
@@ -590,11 +683,11 @@ export class SkillsManager {
     // TODO: Implement actual MCP server startup
     // const { spawn } = await import('child_process');
     // const mcpConfig = skill.config.mcp as McpServerConfig;
-    // 
+    //
     // const proc = spawn(mcpConfig.command, mcpConfig.args || [], {
     //   env: { ...process.env, ...mcpConfig.env },
     // });
-    // 
+    //
     // this.runningServers.set(skill.id, { process: proc, skill });
 
     log(`MCP server started for skill: ${skill.name}`);
@@ -636,7 +729,7 @@ export class SkillsManager {
     const skill = this.loadedSkills.get(skillId);
     if (skill) {
       skill.enabled = enabled;
-      
+
       // Stop server if disabling an MCP skill
       if (!enabled && skill.type === 'mcp') {
         this.stopMcpServer(skillId);
@@ -691,7 +784,10 @@ export class SkillsManager {
   /**
    * List all skills with optional filters
    */
-  async listSkills(filter?: { type?: 'builtin' | 'mcp' | 'custom'; enabled?: boolean }): Promise<Skill[]> {
+  async listSkills(filter?: {
+    type?: 'builtin' | 'mcp' | 'custom';
+    enabled?: boolean;
+  }): Promise<Skill[]> {
     // Load global skills first to ensure they're in loadedSkills
     await this.loadGlobalSkills();
 
@@ -699,10 +795,10 @@ export class SkillsManager {
 
     if (filter) {
       if (filter.type !== undefined) {
-        skills = skills.filter(s => s.type === filter.type);
+        skills = skills.filter((s) => s.type === filter.type);
       }
       if (filter.enabled !== undefined) {
-        skills = skills.filter(s => s.enabled === filter.enabled);
+        skills = skills.filter((s) => s.enabled === filter.enabled);
       }
     }
 
@@ -805,6 +901,14 @@ export class SkillsManager {
    * Recursively copy directory
    */
   private async copyDirectory(source: string, target: string): Promise<void> {
+    // Remove dangling symlink at target before creating directory
+    if (isDanglingSymlink(target)) {
+      try {
+        fs.unlinkSync(target);
+      } catch {
+        if (isDanglingSymlink(target)) throw new Error(`Cannot remove dangling symlink: ${target}`);
+      }
+    }
     if (!fs.existsSync(target)) {
       fs.mkdirSync(target, { recursive: true });
     }
@@ -856,8 +960,15 @@ export class SkillsManager {
       }
     }
 
-    if (fs.existsSync(targetPath)) {
-
+    if (isDanglingSymlink(targetPath)) {
+      try {
+        fs.unlinkSync(targetPath);
+        log(`Removed dangling symlink at: ${targetPath}`);
+      } catch {
+        if (isDanglingSymlink(targetPath))
+          throw new Error(`Cannot remove dangling symlink: ${targetPath}`);
+      }
+    } else if (fs.existsSync(targetPath)) {
       // Delete existing directory
       fs.rmSync(targetPath, { recursive: true, force: true });
       log(`Deleted existing skill directory: ${targetPath}`);
@@ -905,7 +1016,9 @@ export class SkillsManager {
     return Array.from(byName.values());
   }
 
-  async validatePluginFolder(pluginRootPath: string): Promise<{ valid: boolean; errors: string[] }> {
+  async validatePluginFolder(
+    pluginRootPath: string
+  ): Promise<{ valid: boolean; errors: string[] }> {
     const errors: string[] = [];
 
     if (!fs.existsSync(pluginRootPath)) {
