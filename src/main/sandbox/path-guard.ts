@@ -20,57 +20,58 @@ export interface ValidationResult {
 
 // Forbidden path patterns for Linux/WSL - these should never be accessed
 const FORBIDDEN_PATTERNS_LINUX = [
-  /^\/mnt\//,              // Windows filesystem mounts
-  /^\/home\/(?!.*\/\.claude\/sandbox)/,  // User home (except ~/.claude/sandbox)
-  /^\/root\/(?!\.claude\/sandbox|\.nvm)/,  // Root directory (except .claude/sandbox and .nvm)
-  /^\/etc\//,              // System configuration
-  /^\/var\//,              // Variable data
-  /^\/usr\//,              // System binaries
-  /^\/bin\//,              // Essential binaries
-  /^\/sbin\//,             // System binaries
-  /^\/lib/,                // Libraries
-  /^\/opt\//,              // Optional software
-  /^\/tmp\//,              // Temp directory
-  /^\/proc\//,             // Process info
-  /^\/sys\//,              // System info
-  /^\/dev\//,              // Device files
+  /^\/mnt\//, // Windows filesystem mounts
+  /^\/home\/(?!.*\/\.claude\/sandbox)/, // User home (except ~/.claude/sandbox)
+  /^\/root\/(?!\.claude\/sandbox|\.nvm)/, // Root directory (except .claude/sandbox and .nvm)
+  /^\/etc\//, // System configuration
+  /^\/var\//, // Variable data
+  /^\/usr\//, // System binaries
+  /^\/bin\//, // Essential binaries
+  /^\/sbin\//, // System binaries
+  /^\/lib/, // Libraries
+  /^\/opt\//, // Optional software
+  /^\/tmp\//, // Temp directory
+  /^\/proc\//, // Process info
+  /^\/sys\//, // System info
+  /^\/dev\//, // Device files
 ];
 
 // Forbidden path patterns for macOS/Lima - these should never be accessed
 const FORBIDDEN_PATTERNS_MAC = [
-  /^\/System\//,           // macOS system
-  /^\/Library\//,          // System library
-  /^\/private\//,          // Private system files
-  /^\/var\/(?!folders)/,   // System variable (allow /var/folders for temp)
-  /^\/usr\//,              // System binaries
-  /^\/bin\//,              // Essential binaries
-  /^\/sbin\//,             // System binaries
-  /^\/etc\//,              // System configuration
-  /^\/opt\//,              // Optional software
-  /^\/tmp\//,              // Temp directory (use /var/folders instead)
-  /^\/dev\//,              // Device files
-  /^\/Volumes\/(?!Macintosh HD\/Users)/,  // External volumes
-  /^\/Applications\//,     // Applications folder
-  /^\/cores\//,            // Core dumps
+  /^\/System\//, // macOS system
+  /^\/Library\//, // System library
+  /^\/private\//, // Private system files
+  /^\/var\/(?!folders)/, // System variable (allow /var/folders for temp)
+  /^\/usr\//, // System binaries
+  /^\/bin\//, // Essential binaries
+  /^\/sbin\//, // System binaries
+  /^\/etc\//, // System configuration
+  /^\/opt\//, // Optional software
+  /^\/tmp\//, // Temp directory (use /var/folders instead)
+  /^\/dev\//, // Device files
+  /^\/Volumes\/(?!Macintosh HD\/Users)/, // External volumes
+  /^\/Applications\//, // Applications folder
+  /^\/cores\//, // Core dumps
 ];
 
 // Use platform-appropriate patterns
-const FORBIDDEN_PATTERNS = process.platform === 'darwin'
-  ? FORBIDDEN_PATTERNS_MAC
-  : FORBIDDEN_PATTERNS_LINUX;
+const FORBIDDEN_PATTERNS =
+  process.platform === 'darwin' ? FORBIDDEN_PATTERNS_MAC : FORBIDDEN_PATTERNS_LINUX;
 
 // Dangerous command patterns
 const DANGEROUS_COMMAND_PATTERNS = [
-  /\brm\s+(-rf?|--recursive)\s+\/(?!sandbox)/,  // rm -rf / (except /sandbox)
-  /\bchmod\s+777\s+\//,                          // chmod 777 /
-  /\bchown\s+.*\s+\//,                           // chown on root paths
-  /\bdd\s+.*of=\/dev/,                           // dd to devices
-  /\bmkfs/,                                       // format filesystems
-  /\bsudo\s+.*\brm\b/,                           // sudo rm
-  /\bcurl\s+.*\|\s*(ba)?sh/,                     // curl | bash
-  /\bwget\s+.*\|\s*(ba)?sh/,                     // wget | bash
-  />\s*\/etc\//,                                 // redirect to /etc
-  />\s*\/dev\/(?!null)/,                         // redirect to devices (except /dev/null which is safe)
+  /\brm\s+(-rf?|--recursive)\s+\/(?!sandbox)/, // rm -rf / (except /sandbox)
+  /\bchmod\s+777\s+\//, // chmod 777 /
+  /\bchown\s+.*\s+\//, // chown on root paths
+  /\bdd\s+.*of=\/dev/, // dd to devices
+  /\bmkfs/, // format filesystems
+  /\bsudo\s+.*\brm\b/, // sudo rm
+  /\bcurl\s+.*\|\s*(ba)?sh/, // curl | bash
+  /\bwget\s+.*\|\s*(ba)?sh/, // wget | bash
+  />\s*\/etc\//, // redirect to /etc
+  />\s*\/dev\/(?!null)/, // redirect to devices (except /dev/null which is safe)
+  /\beval\s/, // eval execution
+  /\$'\\x/, // hex escape sequences (obfuscation)
 ];
 
 export class PathGuard {
@@ -95,17 +96,31 @@ export class PathGuard {
       return { allowed: true };
     }
 
-    // Allow /root/.nvm for npm/node
-    if (normalizedPath.startsWith('/root/.nvm')) {
-      return { allowed: true };
+    // Allow /root/.nvm for npm/node (read-only: binaries and modules, no writes)
+    if (normalizedPath.startsWith('/root/.nvm/')) {
+      // Only allow access to binaries and packages, not arbitrary writes
+      const nvmReadOnlyPrefixes = [
+        '/root/.nvm/versions/',
+        '/root/.nvm/alias/',
+        '/root/.nvm/nvm.sh',
+      ];
+      if (nvmReadOnlyPrefixes.some((prefix) => normalizedPath.startsWith(prefix))) {
+        return { allowed: true };
+      }
+      return {
+        allowed: false,
+        reason: `Access denied: write access to /root/.nvm is not permitted (${normalizedPath})`,
+      };
     }
 
     // Allow global npm modules only within sandbox or system paths
     if (normalizedPath.includes('/node_modules/')) {
-      if (isPathWithinRoot(normalizedPath, session.sandboxPath) ||
-          normalizedPath.startsWith('/root/.nvm/') ||
-          normalizedPath.startsWith('/usr/lib/node_modules/') ||
-          normalizedPath.startsWith('/usr/local/lib/node_modules/')) {
+      if (
+        isPathWithinRoot(normalizedPath, session.sandboxPath) ||
+        normalizedPath.startsWith('/root/.nvm/') ||
+        normalizedPath.startsWith('/usr/lib/node_modules/') ||
+        normalizedPath.startsWith('/usr/local/lib/node_modules/')
+      ) {
         return { allowed: true };
       }
       // node_modules outside of known safe paths is not auto-allowed

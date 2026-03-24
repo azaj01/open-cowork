@@ -6,7 +6,7 @@ import { isPathWithinRoot } from '../tools/path-containment';
 
 /**
  * PathResolver - Core security component for sandboxed file system access
- * 
+ *
  * All file operations must go through this resolver to ensure:
  * 1. Paths are within authorized directories
  * 2. No path traversal attacks (../)
@@ -31,7 +31,7 @@ export class PathResolver {
 
   /**
    * Resolve virtual path to real path with security validation
-   * 
+   *
    * @param sessionId - Session ID
    * @param virtualPath - Virtual path (e.g., /mnt/workspace/src/index.ts)
    * @returns Real path or null if invalid/unauthorized
@@ -56,10 +56,10 @@ export class PathResolver {
       if (isPathWithinRoot(normalizedVirtual, normalizedMount)) {
         // Calculate relative path from mount point
         const relativePath = normalizedVirtual.slice(normalizedMount.length);
-        
+
         // Construct real path
         const realPath = path.join(mount.real, relativePath);
-        
+
         // Validate the resolved path is within the mount
         if (this.validatePath(sessionId, realPath, mount.real)) {
           return realPath;
@@ -72,7 +72,7 @@ export class PathResolver {
 
   /**
    * Convert real path back to virtual path
-   * 
+   *
    * @param sessionId - Session ID
    * @param realPath - Real file system path
    * @returns Virtual path or null if not in any mount
@@ -87,7 +87,7 @@ export class PathResolver {
 
     for (const mount of mounts) {
       const normalizedMount = path.normalize(mount.real);
-      
+
       if (isPathWithinRoot(normalizedReal, normalizedMount)) {
         const relativePath = normalizedReal.slice(normalizedMount.length);
         return path.posix.join(mount.virtual, relativePath.replace(/\\/g, '/'));
@@ -177,7 +177,11 @@ export class PathResolver {
   /**
    * Check if a path is safe for the given operation
    */
-  isSafeForOperation(sessionId: string, virtualPath: string, operation: 'read' | 'write' | 'execute'): boolean {
+  isSafeForOperation(
+    sessionId: string,
+    virtualPath: string,
+    operation: 'read' | 'write' | 'execute'
+  ): boolean {
     const realPath = this.resolve(sessionId, virtualPath);
     if (!realPath) {
       return false;
@@ -199,10 +203,15 @@ export class PathResolver {
       }
     }
 
-    // For execute, be more restrictive
+    // For execute, verify the file actually exists
     if (operation === 'execute') {
       // Only allow executing within workspace directories
-      return true;
+      try {
+        fs.accessSync(realPath, fs.constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
     }
 
     return false;

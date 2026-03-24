@@ -1,6 +1,6 @@
 /**
  * Native Executor - Direct execution for Mac/Linux
- * 
+ *
  * On non-Windows platforms, we execute commands directly on the host.
  * This provides the same interface as WSLBridge but without WSL isolation.
  */
@@ -11,12 +11,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { log } from '../utils/logger';
 import { isPathWithinRoot } from '../tools/path-containment';
-import type {
-  SandboxConfig,
-  SandboxExecutor,
-  ExecutionResult,
-  DirectoryEntry,
-} from './types';
+import type { SandboxConfig, SandboxExecutor, ExecutionResult, DirectoryEntry } from './types';
 
 /**
  * Native Executor - Runs commands directly on the host system
@@ -32,7 +27,7 @@ export class NativeExecutor implements SandboxExecutor {
   async initialize(config: SandboxConfig): Promise<void> {
     this.config = config;
     this.workspacePath = path.resolve(config.workspacePath);
-    
+
     // Verify workspace exists
     if (!fs.existsSync(this.workspacePath)) {
       throw new Error(`Workspace does not exist: ${this.workspacePath}`);
@@ -56,12 +51,8 @@ export class NativeExecutor implements SandboxExecutor {
 
     // Handle case-insensitive comparison on Windows
     const isWindows = process.platform === 'win32';
-    const workspaceCheck = isWindows 
-      ? normalizedWorkspace.toLowerCase() 
-      : normalizedWorkspace;
-    const targetCheck = isWindows 
-      ? normalizedTarget.toLowerCase() 
-      : normalizedTarget;
+    const workspaceCheck = isWindows ? normalizedWorkspace.toLowerCase() : normalizedWorkspace;
+    const targetCheck = isWindows ? normalizedTarget.toLowerCase() : normalizedTarget;
 
     if (!isPathWithinRoot(targetCheck, workspaceCheck, isWindows)) {
       throw new Error(`Path is outside workspace: ${resolved}`);
@@ -109,7 +100,7 @@ export class NativeExecutor implements SandboxExecutor {
         /reg\s+(add|delete)/i,
         /net\s+(user|localgroup)/i,
         /powershell\s+.*-enc/i,
-        /Set-ExecutionPolicy/i,
+        /Set-ExecutionPolicy/i
       );
     }
 
@@ -138,13 +129,32 @@ export class NativeExecutor implements SandboxExecutor {
     return new Promise((resolve) => {
       const isWindows = process.platform === 'win32';
       const shell = isWindows ? 'powershell.exe' : '/bin/bash';
+      let scriptPath: string | null = null;
       const args = isWindows
         ? (() => {
-            const scriptPath = path.join(os.tmpdir(), `oc-cmd-${Date.now()}.ps1`);
+            scriptPath = path.join(os.tmpdir(), `oc-cmd-${Date.now()}.ps1`);
             fs.writeFileSync(scriptPath, command, 'utf-8');
-            return ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath];
+            return [
+              '-NoProfile',
+              '-NonInteractive',
+              '-ExecutionPolicy',
+              'Bypass',
+              '-File',
+              scriptPath,
+            ];
           })()
         : ['-c', command];
+
+      const cleanupScript = (): void => {
+        if (scriptPath) {
+          try {
+            fs.unlinkSync(scriptPath);
+          } catch (_e) {
+            /* ignore cleanup failure */
+          }
+          scriptPath = null;
+        }
+      };
 
       const proc = spawn(shell, args, {
         cwd: workDir,
@@ -168,6 +178,7 @@ export class NativeExecutor implements SandboxExecutor {
       });
 
       proc.on('error', (error: Error) => {
+        cleanupScript();
         resolve({
           success: false,
           stdout: '',
@@ -177,7 +188,7 @@ export class NativeExecutor implements SandboxExecutor {
       });
 
       proc.on('close', (code: number | null) => {
-        if (isWindows && args[args.length - 1]?.endsWith('.ps1')) { try { fs.unlinkSync(args[args.length - 1]); } catch (_e) { /* ignore cleanup failure */ } }
+        cleanupScript();
         resolve({
           success: code === 0,
           stdout,
@@ -197,7 +208,7 @@ export class NativeExecutor implements SandboxExecutor {
     }
 
     const validPath = this.validatePath(filePath);
-    
+
     if (!fs.existsSync(validPath)) {
       throw new Error(`File not found: ${filePath}`);
     }
@@ -214,7 +225,7 @@ export class NativeExecutor implements SandboxExecutor {
     }
 
     const validPath = this.validatePath(filePath);
-    
+
     // Ensure directory exists
     const dir = path.dirname(validPath);
     if (!fs.existsSync(dir)) {
@@ -233,19 +244,17 @@ export class NativeExecutor implements SandboxExecutor {
     }
 
     const validPath = this.validatePath(dirPath);
-    
+
     if (!fs.existsSync(validPath)) {
       throw new Error(`Directory not found: ${dirPath}`);
     }
 
     const entries = fs.readdirSync(validPath, { withFileTypes: true });
-    
-    return entries.map(entry => ({
+
+    return entries.map((entry) => ({
       name: entry.name,
       isDirectory: entry.isDirectory(),
-      size: entry.isFile() 
-        ? fs.statSync(path.join(validPath, entry.name)).size 
-        : undefined,
+      size: entry.isFile() ? fs.statSync(path.join(validPath, entry.name)).size : undefined,
     }));
   }
 
@@ -270,7 +279,7 @@ export class NativeExecutor implements SandboxExecutor {
     }
 
     const validPath = this.validatePath(filePath);
-    
+
     if (fs.existsSync(validPath)) {
       fs.unlinkSync(validPath);
     }
@@ -285,7 +294,7 @@ export class NativeExecutor implements SandboxExecutor {
     }
 
     const validPath = this.validatePath(dirPath);
-    
+
     if (!fs.existsSync(validPath)) {
       fs.mkdirSync(validPath, { recursive: true });
     }
@@ -301,7 +310,7 @@ export class NativeExecutor implements SandboxExecutor {
 
     const validSrc = this.validatePath(src);
     const validDest = this.validatePath(dest);
-    
+
     // Ensure destination directory exists
     const destDir = path.dirname(validDest);
     if (!fs.existsSync(destDir)) {

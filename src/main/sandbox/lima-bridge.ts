@@ -683,6 +683,16 @@ export class LimaBridge implements SandboxExecutor {
     if (/[;&|`$(){}]/.test(agentPath)) {
       throw new Error(`Invalid agent path: ${agentPath}`);
     }
+
+    // Verify the path contains expected segments to prevent path injection
+    const normalizedAgentPath = agentPath.replace(/\\/g, '/');
+    const hasExpectedSegment =
+      normalizedAgentPath.includes('/lima-agent/') ||
+      normalizedAgentPath.includes('/dist-lima-agent/');
+    if (!hasExpectedSegment) {
+      throw new Error(`Agent path does not contain expected segments: ${agentPath}`);
+    }
+
     const escapedAgentPath = agentPath.replace(/[\\$`"!]/g, '\\$&');
     const nodeCommand = `source ~/.nvm/nvm.sh 2>/dev/null; node "${escapedAgentPath}"`;
 

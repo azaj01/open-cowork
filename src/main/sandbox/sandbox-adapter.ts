@@ -1,10 +1,10 @@
 /**
  * Sandbox Adapter - Platform-aware sandbox execution layer
- * 
+ *
  * Automatically selects the appropriate executor based on platform:
  * - Windows: Uses WSL2 for isolated execution
  * - Mac/Linux: Uses native execution (with warnings)
- * 
+ *
  * Provides a unified interface for:
  * - Command execution
  * - File operations
@@ -59,6 +59,7 @@ export class SandboxAdapter implements SandboxExecutor {
   };
   private _config: SandboxAdapterConfig | null = null;
   private initPromise: Promise<void> | null = null;
+  private reinitializing: boolean = false;
 
   /**
    * Get current sandbox mode
@@ -152,18 +153,18 @@ export class SandboxAdapter implements SandboxExecutor {
    */
   private async initializeWSL(config: SandboxAdapterConfig): Promise<void> {
     log('[SandboxAdapter] Checking WSL2 availability...');
-    
+
     // Try to use cached status from bootstrap first (much faster)
     const bootstrap = getSandboxBootstrap();
     let wslStatus = bootstrap.getCachedWSLStatus();
-    
+
     if (wslStatus) {
       log('[SandboxAdapter] Using cached WSL status from bootstrap');
     } else {
       log('[SandboxAdapter] No cached status, checking WSL...');
       wslStatus = await WSLBridge.checkWSLStatus();
     }
-    
+
     this.state.wslStatus = wslStatus;
 
     log('[SandboxAdapter] WSL Status:', JSON.stringify(wslStatus, null, 2));
@@ -178,9 +179,18 @@ export class SandboxAdapter implements SandboxExecutor {
 
     log('[SandboxAdapter] [OK] WSL2 detected');
     log('[SandboxAdapter]   Distro:', wslStatus.distro);
-    log('[SandboxAdapter]   Node.js:', wslStatus.nodeAvailable ? `[OK] ${wslStatus.version || 'available'}` : '[X] not found');
-    log('[SandboxAdapter]   Python:', wslStatus.pythonAvailable ? `[OK] ${wslStatus.pythonVersion || 'available'}` : '[X] not found');
-    log('[SandboxAdapter]   claude-code:', wslStatus.claudeCodeAvailable ? '[OK] available' : '[!] not in WSL (using Windows)');
+    log(
+      '[SandboxAdapter]   Node.js:',
+      wslStatus.nodeAvailable ? `[OK] ${wslStatus.version || 'available'}` : '[X] not found'
+    );
+    log(
+      '[SandboxAdapter]   Python:',
+      wslStatus.pythonAvailable ? `[OK] ${wslStatus.pythonVersion || 'available'}` : '[X] not found'
+    );
+    log(
+      '[SandboxAdapter]   claude-code:',
+      wslStatus.claudeCodeAvailable ? '[OK] available' : '[!] not in WSL (using Windows)'
+    );
 
     // Check if Node.js needs to be installed
     if (!wslStatus.nodeAvailable) {
@@ -213,7 +223,7 @@ export class SandboxAdapter implements SandboxExecutor {
     try {
       const wslBridge = new WSLBridge();
       await wslBridge.initialize(config);
-      
+
       this.executor = wslBridge;
       this.state.mode = 'wsl';
       log('[SandboxAdapter] [OK] WSL sandbox initialized successfully');
@@ -236,14 +246,14 @@ export class SandboxAdapter implements SandboxExecutor {
     // Try to use cached status from bootstrap first (much faster)
     const bootstrap = getSandboxBootstrap();
     let limaStatus = bootstrap.getCachedLimaStatus();
-    
+
     if (limaStatus) {
       log('[SandboxAdapter] Using cached Lima status from bootstrap');
     } else {
       log('[SandboxAdapter] No cached status, checking Lima...');
       limaStatus = await LimaBridge.checkLimaStatus();
     }
-    
+
     this.state.limaStatus = limaStatus;
 
     log('[SandboxAdapter] Lima Status:', JSON.stringify(limaStatus, null, 2));
@@ -259,8 +269,16 @@ export class SandboxAdapter implements SandboxExecutor {
     log('[SandboxAdapter]   Instance:', limaStatus.instanceName || 'claude-sandbox');
     log('[SandboxAdapter]   Exists:', limaStatus.instanceExists ? '[OK]' : '[X] not created');
     log('[SandboxAdapter]   Running:', limaStatus.instanceRunning ? '[OK]' : '[X] not running');
-    log('[SandboxAdapter]   Node.js:', limaStatus.nodeAvailable ? `[OK] ${limaStatus.version || 'available'}` : '[X] not found');
-    log('[SandboxAdapter]   Python:', limaStatus.pythonAvailable ? `[OK] ${limaStatus.pythonVersion || 'available'}` : '[X] not found');
+    log(
+      '[SandboxAdapter]   Node.js:',
+      limaStatus.nodeAvailable ? `[OK] ${limaStatus.version || 'available'}` : '[X] not found'
+    );
+    log(
+      '[SandboxAdapter]   Python:',
+      limaStatus.pythonAvailable
+        ? `[OK] ${limaStatus.pythonVersion || 'available'}`
+        : '[X] not found'
+    );
 
     // Initialize Lima Bridge
     try {
@@ -321,7 +339,8 @@ export class SandboxAdapter implements SandboxExecutor {
       type: 'warning',
       title: 'WSL2 Not Available',
       message: 'Windows Subsystem for Linux (WSL2) is not installed on this system.',
-      detail: 'For better security, we recommend installing WSL2. ' +
+      detail:
+        'For better security, we recommend installing WSL2. ' +
         'Commands will be executed directly on Windows without sandbox isolation.\n\n' +
         'To install WSL2, run this command in PowerShell as Administrator:\n' +
         'wsl --install\n\n' +
@@ -342,7 +361,8 @@ export class SandboxAdapter implements SandboxExecutor {
       type: 'question',
       title: 'Install Node.js in WSL',
       message: `Node.js is not installed in ${distro}.`,
-      detail: 'Node.js is required for the sandbox environment. ' +
+      detail:
+        'Node.js is required for the sandbox environment. ' +
         'Would you like to install it automatically?',
       buttons: ['Install', 'Skip (use native execution)'],
       defaultId: 0,
@@ -364,7 +384,8 @@ export class SandboxAdapter implements SandboxExecutor {
       type: 'question',
       title: 'Install claude-code in WSL',
       message: `Claude Code is not installed in ${distro}.`,
-      detail: 'Claude Code is required for AI agent functionality. ' +
+      detail:
+        'Claude Code is required for AI agent functionality. ' +
         'Would you like to install it automatically?',
       buttons: ['Install', 'Skip (use native execution)'],
       defaultId: 0,
@@ -386,7 +407,8 @@ export class SandboxAdapter implements SandboxExecutor {
       type: 'warning',
       title: 'Installation Failed',
       message: `Failed to install ${packageName} in WSL.`,
-      detail: 'Please try installing it manually. Commands will be executed ' +
+      detail:
+        'Please try installing it manually. Commands will be executed ' +
         'directly on Windows without sandbox isolation.',
       buttons: ['OK'],
     });
@@ -407,7 +429,8 @@ export class SandboxAdapter implements SandboxExecutor {
       type: 'warning',
       title: 'WSL Initialization Failed',
       message: 'Failed to initialize WSL sandbox.',
-      detail: `Error: ${errorMessage}\n\n` +
+      detail:
+        `Error: ${errorMessage}\n\n` +
         'Commands will be executed directly on Windows without sandbox isolation.',
       buttons: ['OK'],
     });
@@ -423,7 +446,8 @@ export class SandboxAdapter implements SandboxExecutor {
       type: 'warning',
       title: 'Security Warning',
       message: 'Running without sandbox isolation.',
-      detail: 'Commands will be executed directly on your system without ' +
+      detail:
+        'Commands will be executed directly on your system without ' +
         'WSL sandbox protection. This is less secure.\n\n' +
         'Only use this mode with trusted AI agents and workspaces.',
       buttons: ['I Understand'],
@@ -440,7 +464,8 @@ export class SandboxAdapter implements SandboxExecutor {
       type: 'warning',
       title: 'Lima Not Available',
       message: 'Lima is not installed on this system.',
-      detail: 'For better security, we recommend installing Lima for isolated execution.\n\n' +
+      detail:
+        'For better security, we recommend installing Lima for isolated execution.\n\n' +
         'To install Lima, run:\n' +
         'brew install lima\n\n' +
         'Commands will be executed directly on macOS without sandbox isolation.',
@@ -463,7 +488,8 @@ export class SandboxAdapter implements SandboxExecutor {
       type: 'warning',
       title: 'Lima Initialization Failed',
       message: 'Failed to initialize Lima sandbox.',
-      detail: `Error: ${errorMessage}\n\n` +
+      detail:
+        `Error: ${errorMessage}\n\n` +
         'Commands will be executed directly on macOS without sandbox isolation.',
       buttons: ['OK'],
     });
@@ -583,16 +609,25 @@ export class SandboxAdapter implements SandboxExecutor {
    * Call this when sandbox settings change
    */
   async reinitialize(config?: SandboxAdapterConfig): Promise<void> {
+    if (this.reinitializing) {
+      log('[SandboxAdapter] Reinitialize already in progress, skipping');
+      return;
+    }
+    this.reinitializing = true;
     log('[SandboxAdapter] Reinitializing...');
-    await this.shutdown();
-    
-    // Also reset bootstrap cache so it will re-check WSL/Lima status
-    const bootstrap = getSandboxBootstrap();
-    bootstrap.reset();
-    
-    const initConfig = config || this._config || { workspacePath: this.state.workspacePath };
-    await this.initialize(initConfig);
-    log('[SandboxAdapter] Reinitialized with mode:', this.state.mode);
+    try {
+      await this.shutdown();
+
+      // Also reset bootstrap cache so it will re-check WSL/Lima status
+      const bootstrap = getSandboxBootstrap();
+      bootstrap.reset();
+
+      const initConfig = config || this._config || { workspacePath: this.state.workspacePath };
+      await this.initialize(initConfig);
+      log('[SandboxAdapter] Reinitialized with mode:', this.state.mode);
+    } finally {
+      this.reinitializing = false;
+    }
   }
 
   // ==================== Path Utilities ====================
@@ -710,4 +745,3 @@ export async function reinitializeSandbox(config?: SandboxAdapterConfig): Promis
   await adapter.reinitialize(config);
   return adapter;
 }
-

@@ -1,6 +1,6 @@
 /**
  * Sandbox Bootstrap Service
- * 
+ *
  * Handles early sandbox initialization at app startup
  * Provides progress feedback to the renderer process
  * Caches status to avoid repeated slow checks
@@ -12,17 +12,17 @@ import { LimaBridge } from './lima-bridge';
 import { configStore } from '../config/config-store';
 import type { WSLStatus, LimaStatus } from './types';
 
-export type SandboxSetupPhase = 
-  | 'checking'      // Checking WSL/Lima availability
-  | 'creating'      // Creating Lima instance (macOS only)
-  | 'starting'      // Starting Lima instance (macOS only)  
-  | 'installing_node'   // Installing Node.js
+export type SandboxSetupPhase =
+  | 'checking' // Checking WSL/Lima availability
+  | 'creating' // Creating Lima instance (macOS only)
+  | 'starting' // Starting Lima instance (macOS only)
+  | 'installing_node' // Installing Node.js
   | 'installing_python' // Installing Python
-  | 'installing_pip'    // Installing pip
-  | 'installing_deps'   // Installing skill dependencies (markitdown, pypdf, etc.)
-  | 'ready'         // Ready to use
-  | 'skipped'       // No sandbox needed (native mode)
-  | 'error';        // Setup failed
+  | 'installing_pip' // Installing pip
+  | 'installing_deps' // Installing skill dependencies (markitdown, pypdf, etc.)
+  | 'ready' // Ready to use
+  | 'skipped' // No sandbox needed (native mode)
+  | 'error'; // Setup failed
 
 export interface SandboxSetupProgress {
   phase: SandboxSetupPhase;
@@ -51,7 +51,7 @@ export class SandboxBootstrap {
   private setupPromise: Promise<SandboxBootstrapResult> | null = null;
   private progressCallback: ProgressCallback | null = null;
   private result: SandboxBootstrapResult | null = null;
-  
+
   // Cached status for quick access by SandboxAdapter
   private cachedWSLStatus: WSLStatus | null = null;
   private cachedLimaStatus: LimaStatus | null = null;
@@ -126,7 +126,11 @@ export class SandboxBootstrap {
       return this.setupPromise;
     }
 
-    this.setupPromise = this._bootstrap();
+    this.setupPromise = this._bootstrap().catch((err) => {
+      // Clear setupPromise on error so next call retries instead of reusing failed promise
+      this.setupPromise = null;
+      throw err;
+    });
     this.result = await this.setupPromise;
     return this.result;
   }
@@ -188,7 +192,7 @@ export class SandboxBootstrap {
     });
 
     const wslStatus = await WSLBridge.checkWSLStatus();
-    
+
     // Cache the status for SandboxAdapter to use later
     this.cachedWSLStatus = wslStatus;
 
@@ -239,7 +243,7 @@ export class SandboxBootstrap {
       if (pythonInstalled) {
         wslStatus.pythonAvailable = true;
         wslStatus.pipAvailable = true;
-        
+
         // Python install also installs skill deps, so report progress
         this.reportProgress({
           phase: 'installing_deps',
@@ -262,7 +266,7 @@ export class SandboxBootstrap {
       const pipInstalled = await WSLBridge.installPipInWSL(wslStatus.distro!);
       if (pipInstalled) {
         wslStatus.pipAvailable = true;
-        
+
         // After pip install, also install skill dependencies
         this.reportProgress({
           phase: 'installing_deps',
@@ -276,7 +280,7 @@ export class SandboxBootstrap {
 
     // Ready - update cached status
     this.cachedWSLStatus = wslStatus;
-    
+
     this.reportProgress({
       phase: 'ready',
       message: 'WSL2 sandbox ready',
@@ -299,7 +303,7 @@ export class SandboxBootstrap {
     });
 
     let limaStatus = await LimaBridge.checkLimaStatus();
-    
+
     // Cache the status
     this.cachedLimaStatus = limaStatus;
 
@@ -355,7 +359,7 @@ export class SandboxBootstrap {
         return { mode: 'native', limaStatus, error: 'Lima instance start failed' };
       }
       limaStatus.instanceRunning = true;
-      
+
       // Re-check status after starting
       limaStatus = await LimaBridge.checkLimaStatus();
     }
@@ -399,7 +403,7 @@ export class SandboxBootstrap {
       if (pythonInstalled) {
         limaStatus.pythonAvailable = true;
         limaStatus.pipAvailable = true;
-        
+
         // Python install also installs skill deps, so report progress
         this.reportProgress({
           phase: 'installing_deps',
@@ -412,7 +416,7 @@ export class SandboxBootstrap {
 
     // Ready - update cached status
     this.cachedLimaStatus = limaStatus;
-    
+
     this.reportProgress({
       phase: 'ready',
       message: 'Lima sandbox ready',
