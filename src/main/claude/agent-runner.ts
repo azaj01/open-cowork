@@ -648,7 +648,13 @@ ${hints.join('\n')}
       const targetPath = path.join(runtimeSkillsDir, entry.name);
       try {
         if (fs.existsSync(targetPath)) {
-          fs.rmSync(targetPath, { recursive: true, force: true });
+          // Use lstatSync so we don't follow symlinks — check the entry itself
+          const stat = fs.lstatSync(targetPath);
+          if (stat.isSymbolicLink()) {
+            fs.unlinkSync(targetPath);
+          } else {
+            fs.rmSync(targetPath, { recursive: true, force: true });
+          }
         }
         fs.symlinkSync(sourcePath, targetPath, 'dir');
       } catch (err) {
@@ -1867,27 +1873,34 @@ Tool routing:
         if (provider === 'ollama') {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const agent = piSession.agent as any;
-          const originalOnPayload = agent._onPayload as
-            | ((
-                payload: Record<string, unknown>,
-                modelArg: unknown
-              ) => Promise<Record<string, unknown>>)
-            | undefined;
-          const ollamaNumCtx = {
-            value: piModel.contextWindow || 128000,
-          };
-          agent._onPayload = async (payload: Record<string, unknown>, modelArg: unknown) => {
-            let result = originalOnPayload
-              ? await originalOnPayload.call(agent, payload, modelArg)
-              : payload;
-            if (result === undefined) result = payload;
-            return { ...result, num_ctx: ollamaNumCtx.value };
-          };
-          this.piSessions.get(session.id)!.ollamaNumCtx = ollamaNumCtx;
-          log(
-            '[ClaudeAgentRunner] Ollama _onPayload wrapper installed, num_ctx:',
-            ollamaNumCtx.value
-          );
+          // Guard: only patch if the SDK exposes _onPayload (private API)
+          if (!('_onPayload' in agent)) {
+            logWarn(
+              '[ClaudeAgentRunner] SDK agent does not expose _onPayload — skipping Ollama num_ctx patch'
+            );
+          } else {
+            const originalOnPayload = agent._onPayload as
+              | ((
+                  payload: Record<string, unknown>,
+                  modelArg: unknown
+                ) => Promise<Record<string, unknown>>)
+              | undefined;
+            const ollamaNumCtx = {
+              value: piModel.contextWindow || 128000,
+            };
+            agent._onPayload = async (payload: Record<string, unknown>, modelArg: unknown) => {
+              let result = originalOnPayload
+                ? await originalOnPayload.call(agent, payload, modelArg)
+                : payload;
+              if (result === undefined) result = payload;
+              return { ...result, num_ctx: ollamaNumCtx.value };
+            };
+            this.piSessions.get(session.id)!.ollamaNumCtx = ollamaNumCtx;
+            log(
+              '[ClaudeAgentRunner] Ollama _onPayload wrapper installed, num_ctx:',
+              ollamaNumCtx.value
+            );
+          } // end else (_onPayload exists)
         }
 
         logTiming('pi-coding-agent session created', runStartTime);
@@ -2352,13 +2365,13 @@ Tool routing:
           status: 'error',
           title: 'Request timed out',
         });
-      } else {
-        // Complete - update the initial thinking step
-        this.sendTraceUpdate(session.id, thinkingStepId, {
-          status: terminalErrorText ? 'error' : 'completed',
-          title: terminalErrorText ? 'Request failed' : 'Task completed',
-        });
+        return;
       }
+      // Complete - update the initial thinking step
+      this.sendTraceUpdate(session.id, thinkingStepId, {
+        status: terminalErrorText ? 'error' : 'completed',
+        title: terminalErrorText ? 'Request failed' : 'Task completed',
+      });
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         if (abortedByTimeout) {

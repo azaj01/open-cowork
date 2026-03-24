@@ -1112,6 +1112,8 @@ app.on('before-quit', async (event) => {
       tray = null;
       return;
     }
+    // Set the flag immediately before any await to prevent re-entrant cleanup
+    isCleaningUp = true;
     event.preventDefault();
     try {
       await cleanupSandboxResources();

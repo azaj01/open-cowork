@@ -4,6 +4,8 @@
  */
 
 import * as crypto from 'crypto';
+import * as dns from 'dns';
+import { promisify } from 'util';
 import { ChannelBase, withRetry } from '../channel-base';
 import { log, logError, logWarn } from '../../../utils/logger';
 import type {
@@ -662,12 +664,25 @@ export class FeishuChannel extends ChannelBase {
       if (parsed.protocol !== 'https:') {
         throw new Error('Only HTTPS image URLs allowed');
       }
-      if (
-        /^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.|0\.|::1$|[fF][cCdD][0-9a-fA-F]{2}:)/.test(
-          parsed.hostname
-        ) ||
-        parsed.hostname === 'localhost'
-      ) {
+
+      // Resolve the hostname to catch DNS-rebinding and block private IPs
+      const lookup = promisify(dns.lookup);
+      let resolvedIp: string;
+      try {
+        const result = await lookup(parsed.hostname);
+        resolvedIp = result.address;
+      } catch {
+        throw new Error('Failed to resolve image URL hostname');
+      }
+
+      const isPrivateIp = (ip: string): boolean =>
+        /^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.|0\.)/.test(ip) ||
+        /^::1$/.test(ip) ||
+        /^[fF][cCdD][0-9a-fA-F]{2}:/.test(ip) ||
+        // IPv4-mapped IPv6 addresses (::ffff:192.168.x.x etc.)
+        /^::ffff:(127\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.|0\.)/.test(ip);
+
+      if (isPrivateIp(resolvedIp) || parsed.hostname === 'localhost') {
         throw new Error('Internal URLs not allowed');
       }
       // Download and upload

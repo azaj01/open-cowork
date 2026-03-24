@@ -487,7 +487,10 @@ export class ToolExecutor {
         await this.searchDirectoryContents(pathToSearch, regex, results);
         return results.length > 0 ? results.slice(0, 50).join('\n') : 'No matches found';
       } else {
-        // Search file names
+        // Search file names — reject patterns that could escape the workspace
+        if (pattern.startsWith('/') || pattern.startsWith('..')) {
+          throw new Error('Search pattern must be relative and cannot start with / or ..');
+        }
         const files = await glob(pattern, {
           cwd: pathToSearch,
           nodir: false,
@@ -534,6 +537,11 @@ export class ToolExecutor {
    */
   async glob(sessionId: string, pattern: string, searchPath: string): Promise<string> {
     try {
+      // Reject patterns that could escape the workspace
+      if (pattern.startsWith('/') || pattern.startsWith('..')) {
+        throw new Error('Glob pattern must be relative and cannot start with / or ..');
+      }
+
       const pathToSearch = this.resolveWorkspacePath(sessionId, searchPath || '.');
 
       if (!fs.existsSync(pathToSearch)) {
@@ -781,6 +789,14 @@ export class ToolExecutor {
    */
   private async globSearch(pattern: string, context: ExecutionContext): Promise<ToolResult> {
     try {
+      // Reject patterns that could escape the workspace
+      if (pattern.startsWith('/') || pattern.startsWith('..')) {
+        return {
+          success: false,
+          error: 'Glob pattern must be relative and cannot start with / or ..',
+        };
+      }
+
       const mounts = this.pathResolver.getMounts(context.sessionId);
       if (mounts.length === 0) {
         return { success: false, error: 'No mounted directories' };

@@ -33,6 +33,7 @@ export class FeishuWSClient extends EventEmitter {
   private client: Lark.Client | null = null;
   private wsClient: Lark.WSClient | null = null;
   private connected: boolean = false;
+  private stopped: boolean = false;
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 10;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -50,6 +51,9 @@ export class FeishuWSClient extends EventEmitter {
       logWarn('[FeishuWS] Already connected');
       return;
     }
+
+    // Allow re-use after a stop()
+    this.stopped = false;
 
     const { appId, appSecret } = this.config;
 
@@ -69,7 +73,7 @@ export class FeishuWSClient extends EventEmitter {
 
       // Create WebSocket client for receiving messages
       const loggerLevel = this.getLoggerLevel();
-      
+
       this.wsClient = new Lark.WSClient({
         appId,
         appSecret,
@@ -94,12 +98,11 @@ export class FeishuWSClient extends EventEmitter {
       this.reconnectAttempts = 0;
       log('[FeishuWS] Long connection established successfully');
       this.emit('connected');
-
     } catch (error) {
       logError('[FeishuWS] Failed to start:', error);
       this.connected = false;
       this.emit('error', error);
-      
+
       // Try to reconnect
       this.scheduleReconnect();
     }
@@ -110,6 +113,8 @@ export class FeishuWSClient extends EventEmitter {
    */
   async stop(): Promise<void> {
     log('[FeishuWS] Stopping long connection...');
+
+    this.stopped = true;
 
     // Cancel any pending reconnect timer
     if (this.reconnectTimer) {
@@ -151,7 +156,7 @@ export class FeishuWSClient extends EventEmitter {
 
     try {
       let messageContent: string;
-      
+
       if (msgType === 'text') {
         // Text message: wrap in { text: ... }
         messageContent = JSON.stringify({ text: content });
@@ -204,7 +209,7 @@ export class FeishuWSClient extends EventEmitter {
 
     try {
       let messageContent: string;
-      
+
       if (msgType === 'text') {
         messageContent = JSON.stringify({ text: content });
       } else if (msgType === 'interactive') {
@@ -306,6 +311,10 @@ export class FeishuWSClient extends EventEmitter {
    * Schedule reconnection
    */
   private scheduleReconnect(): void {
+    if (this.stopped) {
+      log('[FeishuWS] Client stopped, skipping reconnect');
+      return;
+    }
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       logError('[FeishuWS] Max reconnect attempts reached');
       this.emit('reconnectFailed');
@@ -319,6 +328,7 @@ export class FeishuWSClient extends EventEmitter {
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      if (this.stopped) return;
       this.start().catch((err) => {
         logError('[FeishuWS] Reconnect failed:', err);
       });

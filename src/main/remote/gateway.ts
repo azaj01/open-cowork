@@ -516,6 +516,18 @@ export class RemoteGateway extends EventEmitter {
   }
 
   /**
+   * Restore a previously-paired user directly (called on startup from persisted config).
+   * Bypasses the normal pairing-request flow since the user was already approved.
+   */
+  restorePairedUser(user: PairedUser): void {
+    const userKey = `${user.channelType}:${user.userId}`;
+    if (!this.pairedUsers.has(userKey)) {
+      this.pairedUsers.set(userKey, user);
+      log('[Gateway] Restored paired user:', userKey);
+    }
+  }
+
+  /**
    * Get pending pairing requests
    */
   getPendingPairings(): PairingRequest[] {

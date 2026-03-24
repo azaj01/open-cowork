@@ -29,6 +29,13 @@ function validateSessionId(sessionId: string): void {
   }
 }
 
+/** Validate WSL distro name to prevent command injection */
+function validateDistroName(distro: string): void {
+  if (!/^[a-zA-Z0-9._-]+$/.test(distro)) {
+    throw new Error(`Invalid distro name: ${distro}`);
+  }
+}
+
 export interface SyncSession {
   sessionId: string;
   windowsPath: string; // Original Windows path (e.g., D:\project)
@@ -97,6 +104,7 @@ export class SandboxSync {
     distro: string
   ): Promise<SyncResult> {
     validateSessionId(sessionId);
+    validateDistroName(distro);
 
     // Check if session already exists (sandbox persists across messages)
     const existingSession = sessions.get(sessionId);

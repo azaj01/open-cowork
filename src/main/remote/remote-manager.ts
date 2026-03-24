@@ -243,6 +243,12 @@ export class RemoteManager extends EventEmitter {
 
     log('[RemoteManager] Stopping remote control system...');
 
+    // Clear all pending debounce send timers to avoid post-stop flushes
+    for (const timer of this.sendTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.sendTimers.clear();
+
     // Stop tunnel first
     await tunnelManager.stop();
 
@@ -1072,9 +1078,7 @@ export class RemoteManager extends EventEmitter {
     const users = remoteConfigStore.getPairedUsers();
 
     for (const user of users) {
-      // Re-approve each user in gateway
-      // This is a simplified approach - in production you might want to
-      // directly set the paired users map
+      this.gateway.restorePairedUser(user);
       log('[RemoteManager] Loaded paired user:', user.userId);
     }
   }

@@ -69,6 +69,8 @@ export class MCPManager {
   // Cached base environment (shell env + PATH). Resolved once, reused for all MCP server spawns.
   private cachedBaseEnv: Record<string, string> | null = null;
   private initializingServers = false;
+  // Pending config queued while initialization is in progress
+  private pendingInitConfigs: MCPServerConfig[] | null = null;
   // Guards against concurrent reconnect/update operations on the same server
   private reconnectingServers: Set<string> = new Set();
 
@@ -319,7 +321,11 @@ export class MCPManager {
    * Initialize MCP servers from configuration
    */
   async initializeServers(configs: MCPServerConfig[]): Promise<void> {
-    if (this.initializingServers) return;
+    if (this.initializingServers) {
+      // Store the latest config so we can replay it once the current init finishes
+      this.pendingInitConfigs = configs;
+      return;
+    }
     this.initializingServers = true;
     try {
       const fingerprint = JSON.stringify(
@@ -366,6 +372,12 @@ export class MCPManager {
       await this.refreshTools();
     } finally {
       this.initializingServers = false;
+      // Replay any config that arrived while we were initializing
+      if (this.pendingInitConfigs !== null) {
+        const pending = this.pendingInitConfigs;
+        this.pendingInitConfigs = null;
+        await this.initializeServers(pending);
+      }
     }
   }
 
@@ -1284,10 +1296,12 @@ export class MCPManager {
     let compatHotReloadTried = false;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      // Re-lookup tool on every iteration: after reconnect the registry is refreshed
+      const currentTool = this.tools.get(toolName) ?? tool;
       try {
-        const client = this.clients.get(tool.serverId);
+        const client = this.clients.get(currentTool.serverId);
         if (!client) {
-          throw new Error(`MCP server not connected: ${tool.serverId}`);
+          throw new Error(`MCP server not connected: ${currentTool.serverId}`);
         }
 
         // Add timeout for tool call
@@ -1318,13 +1332,13 @@ export class MCPManager {
         }
         if (
           !compatHotReloadTried &&
-          shouldHotReloadGuiVisionServer(tool.serverName, actualToolName, toolErrorMessage)
+          shouldHotReloadGuiVisionServer(currentTool.serverName, actualToolName, toolErrorMessage)
         ) {
           compatHotReloadTried = true;
           logWarn(
-            `[MCPManager] Detected GUI vision compatibility error (${toolErrorMessage}). Reconnecting server ${tool.serverName} and retrying once.`
+            `[MCPManager] Detected GUI vision compatibility error (${toolErrorMessage}). Reconnecting server ${currentTool.serverName} and retrying once.`
           );
-          const reconnected = await this.reconnectServer(tool.serverId);
+          const reconnected = await this.reconnectServer(currentTool.serverId);
           if (reconnected) {
             continue;
           }
@@ -1352,14 +1366,14 @@ export class MCPManager {
 
         if (shouldReconnect) {
           log(
-            `[MCPManager] Reconnectable MCP error detected for ${tool.serverName}; attempting reconnect...`
+            `[MCPManager] Reconnectable MCP error detected for ${currentTool.serverName}; attempting reconnect...`
           );
-          const reconnected = await this.reconnectServer(tool.serverId);
+          const reconnected = await this.reconnectServer(currentTool.serverId);
           if (reconnected) {
             continue;
           }
           logWarn(
-            `[MCPManager] Reconnect attempt failed for ${tool.serverName}, will retry after backoff`
+            `[MCPManager] Reconnect attempt failed for ${currentTool.serverName}, will retry after backoff`
           );
           const delay = Math.min(2000 * Math.pow(1.5, attempt), 10000);
           await new Promise((resolve) => setTimeout(resolve, delay));
