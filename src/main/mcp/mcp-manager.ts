@@ -57,8 +57,10 @@ export interface MCPTool {
  */
 export class MCPManager {
   private clients: Map<string, Client> = new Map();
-  private transports: Map<string, StdioClientTransport | SSEClientTransport | StreamableHTTPClientTransport> = new Map();
-  private processes: Map<string, ChildProcess> = new Map();
+  private transports: Map<
+    string,
+    StdioClientTransport | SSEClientTransport | StreamableHTTPClientTransport
+  > = new Map();
   private tools: Map<string, MCPTool> = new Map(); // toolName -> MCPTool
   private serverConfigs: Map<string, MCPServerConfig> = new Map();
   private npxPath: string | null = null; // Cached npx path
@@ -81,13 +83,13 @@ export class MCPManager {
     const fs = require('fs');
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const os = require('os');
-    
+
     const platform = os.platform();
     const arch = os.arch();
-    
+
     // In production, resources are in app.asar.unpacked or extraResources
     let resourcesPath: string;
-    
+
     if (!app.isPackaged) {
       // Development: use downloaded node in resources/node
       // __dirname is dist-electron/main, so go up to project root
@@ -99,29 +101,31 @@ export class MCPManager {
       log('[MCPManager] Production mode, using bundled node in extraResources');
       resourcesPath = path.join(process.resourcesPath, 'node');
     }
-    
+
     log(`[MCPManager] Looking for bundled Node.js at: ${resourcesPath}`);
-    
+
     if (!fs.existsSync(resourcesPath)) {
       logWarn(`[MCPManager] Bundled Node.js not found at: ${resourcesPath}`);
       return null;
     }
-    
+
     // Determine binary paths based on platform
     const binDir = platform === 'win32' ? resourcesPath : path.join(resourcesPath, 'bin');
     const nodeExe = platform === 'win32' ? 'node.exe' : 'node';
     const npxExe = platform === 'win32' ? 'npx.cmd' : 'npx';
-    
+
     const nodePath = path.join(binDir, nodeExe);
     const npxPath = path.join(binDir, npxExe);
-    
+
     // Verify files exist
     if (fs.existsSync(nodePath) && fs.existsSync(npxPath)) {
       log(`[MCPManager] Found bundled Node.js: ${nodePath}`);
       log(`[MCPManager] Found bundled npx: ${npxPath}`);
       return { node: nodePath, npx: npxPath };
     } else {
-      logWarn(`[MCPManager] Bundled binaries incomplete - node: ${fs.existsSync(nodePath)}, npx: ${fs.existsSync(npxPath)}`);
+      logWarn(
+        `[MCPManager] Bundled binaries incomplete - node: ${fs.existsSync(nodePath)}, npx: ${fs.existsSync(npxPath)}`
+      );
       return null;
     }
   }
@@ -133,16 +137,16 @@ export class MCPManager {
   private async checkNpxInPath(): Promise<void> {
     const bundledNode = this.getBundledNodePath();
     if (!bundledNode) {
-      const errorMessage = 
+      const errorMessage =
         'Bundled Node.js not found. Please reinstall the application.\n' +
         '未找到内置的 Node.js。请重新安装应用。\n\n' +
         'The application requires bundled Node.js to run MCP servers.\n' +
         '应用需要内置的 Node.js 来运行 MCP 服务器。';
-      
+
       logError('[MCPManager] Bundled Node.js not found');
       throw new Error(errorMessage);
     }
-    
+
     this.npxPath = bundledNode.npx;
     log(`[MCPManager] Using bundled npx: ${this.npxPath}`);
   }
@@ -163,9 +167,9 @@ export class MCPManager {
    * Heavy operation — called once, then cached by getEnhancedEnv.
    */
   private async resolveBaseEnv(): Promise<Record<string, string>> {
-    const { exec } = await import('child_process');
+    const { execFile } = await import('child_process');
     const { promisify } = await import('util');
-    const execAsync = promisify(exec);
+    const execFileAsync = promisify(execFile);
     const os = await import('os');
     const path = await import('path');
 
@@ -181,19 +185,20 @@ export class MCPManager {
       try {
         const shell = getDefaultShell();
         const shellName = path.basename(shell);
-        
+
         log(`[MCPManager] Getting full environment from ${shellName}...`);
-        
+
         // Use login shell to get full environment including PATH
-        const { stdout } = await execAsync(`${shell} -l -c 'env'`, { 
+        // execFile avoids shell injection — args passed as array, not interpolated string
+        const { stdout } = await execFileAsync(shell, ['-l', '-c', 'env'], {
           timeout: 5000,
-          env: { HOME: homeDir }
+          env: { HOME: homeDir },
         });
-        
+
         // Parse environment variables
         const lines = stdout.split(/\r?\n/);
         const shellEnv: Record<string, string> = {};
-        
+
         for (const line of lines) {
           const equalIndex = line.indexOf('=');
           if (equalIndex > 0) {
@@ -202,20 +207,20 @@ export class MCPManager {
             shellEnv[key] = value;
           }
         }
-        
+
         // Merge shell environment safely: enrich missing runtime vars but never override
         // config-sensitive keys that were already set by app runtime.
         env = mergeShellEnvForMcp(env, shellEnv);
-        
+
         // Special handling for PATH: merge both shell PATH and process PATH
         // This ensures we have both user tools (from shell) and system paths (from process)
         if (shellEnv.PATH && process.env.PATH) {
           // For Unix systems (darwin/linux), path delimiter is ':'
           const pathDelimiter = ':';
-          
-          const shellPaths = shellEnv.PATH.split(pathDelimiter).filter(p => p.trim());
-          const processPaths = process.env.PATH.split(pathDelimiter).filter(p => p.trim());
-          
+
+          const shellPaths = shellEnv.PATH.split(pathDelimiter).filter((p) => p.trim());
+          const processPaths = process.env.PATH.split(pathDelimiter).filter((p) => p.trim());
+
           // Combine and deduplicate paths (shell paths first for priority)
           const allPaths = [...shellPaths];
           for (const p of processPaths) {
@@ -223,17 +228,23 @@ export class MCPManager {
               allPaths.push(p);
             }
           }
-          
+
           env.PATH = allPaths.join(pathDelimiter);
-          log(`[MCPManager] Merged PATH: ${shellPaths.length} paths from shell + ${processPaths.length - (allPaths.length - shellPaths.length)} unique paths from process = ${allPaths.length} total`);
+          log(
+            `[MCPManager] Merged PATH: ${shellPaths.length} paths from shell + ${processPaths.length - (allPaths.length - shellPaths.length)} unique paths from process = ${allPaths.length} total`
+          );
         } else if (shellEnv.PATH) {
           env.PATH = shellEnv.PATH;
           log(`[MCPManager] Using shell PATH only`);
         }
-        
-        log(`[MCPManager] Enhanced environment with ${Object.keys(shellEnv).length} variables from shell`);
+
+        log(
+          `[MCPManager] Enhanced environment with ${Object.keys(shellEnv).length} variables from shell`
+        );
       } catch (error: unknown) {
-        logWarn(`[MCPManager] Could not get environment from shell: ${error instanceof Error ? error.message : String(error)}`);
+        logWarn(
+          `[MCPManager] Could not get environment from shell: ${error instanceof Error ? error.message : String(error)}`
+        );
         logWarn(`[MCPManager] Using limited process.env, MCP servers may fail`);
       }
     } else if (platform === 'win32') {
@@ -241,7 +252,10 @@ export class MCPManager {
       // Use full path to avoid relying on PATH in Electron packaged environment
       const psExe = path.join(
         process.env.SystemRoot || 'C:\\Windows',
-        'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'
+        'System32',
+        'WindowsPowerShell',
+        'v1.0',
+        'powershell.exe'
       );
       try {
         const { stdout } = await execAsync(
@@ -250,40 +264,47 @@ export class MCPManager {
         );
         if (stdout.trim()) {
           const pathDelimiter = ';';
-          const winPaths = stdout.trim().split(pathDelimiter).filter(p => p.trim());
-          const currentPaths = (env.PATH || '').split(pathDelimiter).filter(p => p.trim());
+          const winPaths = stdout
+            .trim()
+            .split(pathDelimiter)
+            .filter((p) => p.trim());
+          const currentPaths = (env.PATH || '').split(pathDelimiter).filter((p) => p.trim());
           const allPaths = [...winPaths];
           for (const p of currentPaths) {
-            if (!allPaths.some(ep => ep.toLowerCase() === p.toLowerCase())) {
+            if (!allPaths.some((ep) => ep.toLowerCase() === p.toLowerCase())) {
               allPaths.push(p);
             }
           }
           env.PATH = allPaths.join(pathDelimiter);
-          log(`[MCPManager] Enhanced Windows PATH: ${winPaths.length} user/machine paths + ${allPaths.length - winPaths.length} unique process paths = ${allPaths.length} total`);
+          log(
+            `[MCPManager] Enhanced Windows PATH: ${winPaths.length} user/machine paths + ${allPaths.length - winPaths.length} unique process paths = ${allPaths.length} total`
+          );
         }
       } catch (error: unknown) {
-        logWarn(`[MCPManager] Could not get Windows PATH from PowerShell: ${error instanceof Error ? error.message : String(error)}`);
+        logWarn(
+          `[MCPManager] Could not get Windows PATH from PowerShell: ${error instanceof Error ? error.message : String(error)}`
+        );
       }
     }
-    
+
     // Add bundled Node.js bin directory to PATH (highest priority)
     // This ensures npx can find the bundled node executable
     const bundledNode = this.getBundledNodePath();
     if (bundledNode && env.PATH) {
       const nodeBinDir = path.dirname(bundledNode.node);
       const pathDelimiter = platform === 'win32' ? ';' : ':';
-      
+
       // Prepend bundled node bin directory to PATH
-      const pathParts = env.PATH.split(pathDelimiter).filter(p => p.trim());
-      
+      const pathParts = env.PATH.split(pathDelimiter).filter((p) => p.trim());
+
       // Remove bundled path if it already exists (to avoid duplicates)
-      const filteredPaths = pathParts.filter(p => p !== nodeBinDir);
-      
+      const filteredPaths = pathParts.filter((p) => p !== nodeBinDir);
+
       // Add bundled path at the beginning
       env.PATH = [nodeBinDir, ...filteredPaths].join(pathDelimiter);
       log(`[MCPManager] Prepended bundled Node.js bin to PATH: ${nodeBinDir}`);
     }
-    
+
     log(`[MCPManager] Final PATH: ${env.PATH?.substring(0, 150)}...`);
 
     return env;
@@ -296,38 +317,48 @@ export class MCPManager {
     if (this.initializingServers) return;
     this.initializingServers = true;
     try {
-    const fingerprint = JSON.stringify(configs.map(c => ({ id: c.id, enabled: c.enabled, command: c.command, args: c.args, url: c.url, env: c.env })));
-    if (fingerprint === this.lastConfigFingerprint) {
-      log('[MCPManager] Config unchanged, skipping re-initialization');
-      return;
-    }
-    this.lastConfigFingerprint = fingerprint;
+      const fingerprint = JSON.stringify(
+        configs.map((c) => ({
+          id: c.id,
+          enabled: c.enabled,
+          command: c.command,
+          args: c.args,
+          url: c.url,
+          env: c.env,
+          headers: c.headers,
+        }))
+      );
+      if (fingerprint === this.lastConfigFingerprint) {
+        log('[MCPManager] Config unchanged, skipping re-initialization');
+        return;
+      }
+      this.lastConfigFingerprint = fingerprint;
 
-    log('[MCPManager] Initializing', configs.length, 'MCP servers');
+      log('[MCPManager] Initializing', configs.length, 'MCP servers');
 
-    // Close existing connections
-    await this.disconnectAll();
+      // Close existing connections
+      await this.disconnectAll();
 
-    // Store configurations
-    this.serverConfigs.clear();
-    for (const config of configs) {
-      this.serverConfigs.set(config.id, config);
-    }
+      // Store configurations
+      this.serverConfigs.clear();
+      for (const config of configs) {
+        this.serverConfigs.set(config.id, config);
+      }
 
-    // Connect to enabled servers in parallel
-    const enabledConfigs = configs.filter(c => c.enabled);
-    await Promise.allSettled(
-      enabledConfigs.map(async (config) => {
-        try {
-          await this.connectServer(config);
-        } catch (error) {
-          logError(`[MCPManager] Failed to connect to server ${config.name}:`, error);
-        }
-      })
-    );
+      // Connect to enabled servers in parallel
+      const enabledConfigs = configs.filter((c) => c.enabled);
+      await Promise.allSettled(
+        enabledConfigs.map(async (config) => {
+          try {
+            await this.connectServer(config);
+          } catch (error) {
+            logError(`[MCPManager] Failed to connect to server ${config.name}:`, error);
+          }
+        })
+      );
 
-    // Refresh tools from all connected servers
-    await this.refreshTools();
+      // Refresh tools from all connected servers
+      await this.refreshTools();
     } finally {
       this.initializingServers = false;
     }
@@ -338,20 +369,27 @@ export class MCPManager {
    * This is more efficient than reinitializing all servers
    */
   async updateServer(config: MCPServerConfig): Promise<void> {
+    // Defer if initialization is in progress to avoid races
+    if (this.initializingServers) {
+      log('[MCPManager] Deferring update during initialization');
+      return;
+    }
     // Prevent concurrent update while a reconnect is already in progress for this server
     if (this.reconnectingServers.has(config.id)) {
-      logWarn(`[MCPManager] Skipping updateServer for ${config.name}: reconnect already in progress`);
+      logWarn(
+        `[MCPManager] Skipping updateServer for ${config.name}: reconnect already in progress`
+      );
       return;
     }
     log(`[MCPManager] Updating server: ${config.name} (enabled: ${config.enabled})`);
     this.lastConfigFingerprint = null;
-    
+
     // Store the updated config
     this.serverConfigs.set(config.id, config);
-    
+
     // Check if server is currently connected
     const isConnected = this.clients.has(config.id);
-    
+
     if (config.enabled && !isConnected) {
       // Need to connect
       try {
@@ -404,7 +442,7 @@ export class MCPManager {
       // Convert .ts extension to .js
       const jsFilename = filename.replace(/\.ts$/, '.js');
       const mcpPath = path.join(process.resourcesPath || '', 'mcp', jsFilename);
-      
+
       // Check if compiled JS file exists in resources
       try {
         if (fs.existsSync(mcpPath)) {
@@ -417,7 +455,7 @@ export class MCPManager {
         logError(`[MCPManager] Error checking MCP server path: ${error}`);
       }
     }
-    
+
     // Development: __dirname is dist-electron/main
     // Need to go up 2 levels to get to project root (dist-electron/main -> dist-electron -> project root)
     const projectRoot = path.join(__dirname, '..', '..');
@@ -437,7 +475,7 @@ export class MCPManager {
 
     // Fallback to source TypeScript (requires running via tsx/ts-node if using command 'node')
     const sourcePath = path.join(projectRoot, 'src', 'main', 'mcp', filename);
-    
+
     // Verify file exists and log for debugging
     try {
       if (fs.existsSync(sourcePath)) {
@@ -451,7 +489,7 @@ export class MCPManager {
     } catch (error) {
       logError('[MCPManager] Error checking file:', error);
     }
-    
+
     return sourcePath;
   }
 
@@ -487,27 +525,32 @@ export class MCPManager {
       let command = config.command;
       // Resolve path placeholders for presets
       let args = config.args || [];
-      
+
       // Auto-migrate old configs: if using 'npx -y tsx' with built-in MCP servers, switch to 'node'
-      const isBuiltinServer = (config.name === 'GUI_Operate' || config.name === 'GUI Operate' || 
-                                config.name === 'Software_Development' || config.name === 'Software Development');
-      const isOldConfig = (command === 'npx' || command.endsWith('/npx')) && 
-                          args.includes('-y') && args.includes('tsx');
-      
+      const isBuiltinServer =
+        config.name === 'GUI_Operate' ||
+        config.name === 'GUI Operate' ||
+        config.name === 'Software_Development' ||
+        config.name === 'Software Development';
+      const isOldConfig =
+        (command === 'npx' || command.endsWith('/npx')) &&
+        args.includes('-y') &&
+        args.includes('tsx');
+
       if (isBuiltinServer && isOldConfig && app.isPackaged) {
         log(`[MCPManager] Auto-migrating ${config.name} from npx/tsx to node (production mode)`);
-        
+
         // Get bundled node path
         const bundledNode = this.getBundledNodePath();
         if (bundledNode) {
           command = bundledNode.node;
           // Remove '-y', 'tsx' from args, keep only the script path
-          args = args.filter(arg => arg !== '-y' && arg !== 'tsx');
+          args = args.filter((arg) => arg !== '-y' && arg !== 'tsx');
           log(`[MCPManager] Updated command: ${command} ${args.join(' ')}`);
         }
       }
-      
-      args = args.map(arg => {
+
+      args = args.map((arg) => {
         // Software Development server path
         if (arg === '{SOFTWARE_DEV_SERVER_PATH}') {
           return this.getSoftwareDevServerPath();
@@ -515,7 +558,7 @@ export class MCPManager {
         // GUI Operate server path
         if (arg === '{GUI_OPERATE_SERVER_PATH}') {
           return this.getGuiOperateServerPath();
-      }
+        }
         return arg;
       });
 
@@ -524,18 +567,18 @@ export class MCPManager {
       if (!app.isPackaged && isBuiltinServer) {
         const cmdBase = path.basename(command).toLowerCase();
         const isNodeCmd = cmdBase === 'node' || cmdBase === 'node.exe';
-        const tsScript = args.find(a => typeof a === 'string' && a.endsWith('.ts'));
+        const tsScript = args.find((a) => typeof a === 'string' && a.endsWith('.ts'));
         if (isNodeCmd && tsScript) {
           throw new Error(
             `[MCPManager] Development config is trying to run a TypeScript MCP server with node:\n` +
-            `  ${command} ${args.join(' ')}\n\n` +
-            `Fix:\n` +
-            `- Run: npm run build:mcp (or restart npm run dev, which should run it)\n` +
-            `- Or change this server command to: npx -y tsx <server.ts>\n`
+              `  ${command} ${args.join(' ')}\n\n` +
+              `Fix:\n` +
+              `- Run: npm run build:mcp (or restart npm run dev, which should run it)\n` +
+              `- Or change this server command to: npx -y tsx <server.ts>\n`
           );
         }
       }
-      
+
       // If command is 'npx', check if it's in PATH
       if (command === 'npx' || command.endsWith('/npx')) {
         // Check if npx is in PATH, throw error if not found
@@ -554,9 +597,13 @@ export class MCPManager {
       if (process.platform === 'win32') {
         const cmdBase = path.basename(command).toLowerCase();
         const winSuffixMap: Record<string, string> = {
-          'npx': '.cmd', 'npm': '.cmd', 'yarn': '.cmd', 'pnpm': '.cmd',
-          'tsx': '.cmd', 'ts-node': '.cmd',
-          'node': '.exe',
+          npx: '.cmd',
+          npm: '.cmd',
+          yarn: '.cmd',
+          pnpm: '.cmd',
+          tsx: '.cmd',
+          'ts-node': '.cmd',
+          node: '.exe',
         };
         // Only touch bare commands (no directory separator, no existing extension)
         if (winSuffixMap[cmdBase] && command === cmdBase) {
@@ -564,11 +611,11 @@ export class MCPManager {
           log(`[MCPManager] Windows: resolved bare command '${cmdBase}' to '${command}'`);
         }
       }
-      
+
       // Store for error logging
       commandForLogging = command;
       argsForLogging = args;
-      
+
       // Get environment variables
       const env = await this.getEnhancedEnv(config.env || {});
       log('[MCPManager] Server auth env summary', {
@@ -580,15 +627,19 @@ export class MCPManager {
         ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY?.trim() ? 'set' : 'unset',
         ANTHROPIC_AUTH_TOKEN: env.ANTHROPIC_AUTH_TOKEN?.trim() ? 'set' : 'unset',
       });
-      
+
       // In production, set NODE_PATH to include unpacked node_modules
       if (app.isPackaged && isBuiltinServer) {
-        const unpackedNodeModules = path.join(process.resourcesPath || '', 'app.asar.unpacked', 'node_modules');
+        const unpackedNodeModules = path.join(
+          process.resourcesPath || '',
+          'app.asar.unpacked',
+          'node_modules'
+        );
         const asarNodeModules = path.join(process.resourcesPath || '', 'app.asar', 'node_modules');
-        
+
         // Add both paths to NODE_PATH (unpacked takes priority)
         const nodePaths = [unpackedNodeModules, asarNodeModules];
-        
+
         env.NODE_PATH = nodePaths.join(path.delimiter);
         log(`[MCPManager] Set NODE_PATH for MCP server: ${env.NODE_PATH}`);
 
@@ -602,7 +653,7 @@ export class MCPManager {
       log(`[MCPManager] PATH: ${env.PATH?.substring(0, 200)}...`);
       log(`[MCPManager] HOME: ${env.HOME}`);
       log(`[MCPManager] NODE_PATH: ${env.NODE_PATH || '(not set)'}`);
-      
+
       // Test if npx can be executed with the current environment
       try {
         const { execFile } = await import('child_process');
@@ -612,13 +663,20 @@ export class MCPManager {
         log(`[MCPManager] Testing npx execution: ${command} --version`);
         const testResult = await execFileAsync(command, ['--version'], {
           timeout: 5000,
-          env: env
+          env: env,
         });
         log(`[MCPManager] npx test successful: ${testResult.stdout.trim()}`);
       } catch (testError: unknown) {
-        logError(`[MCPManager] npx test failed: ${testError instanceof Error ? testError.message : String(testError)}`);
-        if (testError instanceof Error && (testError as NodeJS.ErrnoException & { stderr?: string }).stderr) {
-          logError(`[MCPManager] npx test stderr: ${(testError as NodeJS.ErrnoException & { stderr?: string }).stderr}`);
+        logError(
+          `[MCPManager] npx test failed: ${testError instanceof Error ? testError.message : String(testError)}`
+        );
+        if (
+          testError instanceof Error &&
+          (testError as NodeJS.ErrnoException & { stderr?: string }).stderr
+        ) {
+          logError(
+            `[MCPManager] npx test stderr: ${(testError as NodeJS.ErrnoException & { stderr?: string }).stderr}`
+          );
         }
         logError(`[MCPManager] This indicates npx cannot run with the current environment`);
       }
@@ -630,12 +688,12 @@ export class MCPManager {
         env,
         cwd: config.cwd || undefined,
       });
-      
+
       log(`[MCPManager] STDIO transport created successfully`);
-      
+
       // IMPORTANT: Wait a bit for the process to spawn
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
       // Try to capture stderr from the spawned process for debugging
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -647,20 +705,10 @@ export class MCPManager {
           // Unref so this child process doesn't prevent parent exit
           process.unref();
 
-          // Capture stdout for debugging
-          if (process.stdout) {
-            process.stdout.on('data', (data: Buffer) => {
-              try {
-                const message = data.toString().trim();
-                if (message) {
-                  log(`[MCPManager] MCP server stdout: ${message}`);
-                }
-              } catch (error) {
-                logError('[MCPManager] Error processing MCP server stdout:', error);
-              }
-            });
-          }
-          
+          // NOTE: Do NOT attach a 'data' listener to process.stdout here.
+          // The StdioClientTransport owns stdout as its JSON-RPC channel; a competing
+          // listener would consume bytes and corrupt the protocol framing.
+
           // Listen to stderr for error messages
           if (process.stderr) {
             process.stderr.on('data', (data: Buffer) => {
@@ -674,7 +722,7 @@ export class MCPManager {
               }
             });
           }
-          
+
           // Listen to process exit
           process.on('exit', (code: number, signal: string) => {
             if (code !== null && code !== 0) {
@@ -685,7 +733,7 @@ export class MCPManager {
               log(`[MCPManager] MCP server process exited normally`);
             }
           });
-          
+
           process.on('error', (error: Error) => {
             logError(`[MCPManager] MCP server process error: ${error.message}`);
             logError(`[MCPManager] Error stack: ${error.stack}`);
@@ -695,7 +743,9 @@ export class MCPManager {
         }
       } catch (e: unknown) {
         // Ignore if we can't access internal process
-        logWarn(`[MCPManager] Could not attach to MCP server process for logging: ${e instanceof Error ? e.message : String(e)}`);
+        logWarn(
+          `[MCPManager] Could not attach to MCP server process for logging: ${e instanceof Error ? e.message : String(e)}`
+        );
       }
     } else if (config.type === 'sse') {
       if (!config.url) {
@@ -709,11 +759,8 @@ export class MCPManager {
         throw new Error(`SSE server ${config.name} has a malformed URL: "${config.url}"`);
       }
 
-      // Create SSE transport
-      transport = new SSEClientTransport(
-        sseUrl,
-        config.headers || {}
-      );
+      // Create SSE transport — headers must be passed via requestInit, not as a raw dict
+      transport = new SSEClientTransport(sseUrl, { requestInit: { headers: config.headers } });
     } else if (config.type === 'streamable-http') {
       if (!config.url) {
         throw new Error(`Streamable HTTP server ${config.name} requires a URL`);
@@ -725,7 +772,9 @@ export class MCPManager {
       try {
         httpUrl = new URL(config.url);
       } catch {
-        throw new Error(`Streamable HTTP server ${config.name} has a malformed URL: "${config.url}"`);
+        throw new Error(
+          `Streamable HTTP server ${config.name} has a malformed URL: "${config.url}"`
+        );
       }
 
       // Create Streamable HTTP transport
@@ -733,10 +782,7 @@ export class MCPManager {
       if (config.headers && Object.keys(config.headers).length > 0) {
         requestInit.headers = config.headers;
       }
-      transport = new StreamableHTTPClientTransport(
-        httpUrl,
-        { requestInit }
-      );
+      transport = new StreamableHTTPClientTransport(httpUrl, { requestInit });
     } else {
       throw new Error(`Unsupported transport type: ${config.type}`);
     }
@@ -761,7 +807,9 @@ export class MCPManager {
     } catch (error: unknown) {
       logError(`[MCPManager] Client.connect() failed:`, error);
       const connErr = error as { code?: unknown; name?: unknown; message?: unknown };
-      logError(`[MCPManager] Error details - code: ${connErr.code}, name: ${connErr.name}, message: ${connErr.message}`);
+      logError(
+        `[MCPManager] Error details - code: ${connErr.code}, name: ${connErr.name}, message: ${connErr.message}`
+      );
 
       // Try to get more details from the transport
       if (config.type === 'stdio' && commandForLogging) {
@@ -769,7 +817,11 @@ export class MCPManager {
         logError(`[MCPManager] Command was: ${commandForLogging} ${argsForLogging.join(' ')}`);
       }
 
-      try { await transport.close(); } catch { /* ignore close error */ }
+      try {
+        await transport.close();
+      } catch {
+        /* ignore close error */
+      }
       throw error;
     }
 
@@ -794,7 +846,7 @@ export class MCPManager {
       const response = await fetch('http://localhost:9222/json/version', {
         signal: AbortSignal.timeout(2000),
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         log(`[MCPManager] Chrome debug port response: ${JSON.stringify(data)}`);
@@ -804,7 +856,9 @@ export class MCPManager {
         return false;
       }
     } catch (error: unknown) {
-      log(`[MCPManager] Chrome debug port check failed: ${error instanceof Error ? error.message : String(error)}`);
+      log(
+        `[MCPManager] Chrome debug port check failed: ${error instanceof Error ? error.message : String(error)}`
+      );
       return false;
     }
   }
@@ -812,22 +866,25 @@ export class MCPManager {
   /**
    * Wait for Chrome debugging port to become ready with retries
    */
-  private async waitForChromeDebugPort(maxRetries: number = 15, delayMs: number = 1000): Promise<boolean> {
+  private async waitForChromeDebugPort(
+    maxRetries: number = 15,
+    delayMs: number = 1000
+  ): Promise<boolean> {
     log(`[MCPManager] Waiting for Chrome debug port (max ${maxRetries} retries)...`);
-    
+
     for (let i = 0; i < maxRetries; i++) {
       const isReady = await this.isChromeDebugPortReady();
       if (isReady) {
         log(`[MCPManager] Chrome debug port ready ✓ (attempt ${i + 1})`);
         return true;
       }
-      
+
       if (i < maxRetries - 1) {
         log(`[MCPManager] Port not ready, retrying in ${delayMs}ms... (${i + 1}/${maxRetries})`);
-        await new Promise(resolve => setTimeout(resolve, delayMs));
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }
-    
+
     logWarn(`[MCPManager] Chrome debug port not ready after ${maxRetries} attempts`);
     return false;
   }
@@ -835,22 +892,26 @@ export class MCPManager {
   /**
    * Ensure Chrome is ready by checking connection and auto-starting if needed
    * This prevents the first tool call from failing with connection errors
-   * 
+   *
    * Logic:
    * 1. Check if port 9222 is accessible
    * 2. If yes, use existing Chrome instance
    * 3. If no, start a new Chrome instance with debugging enabled
    */
-  private async ensureChromeReady(_serverId: string, serverName: string, client: Client): Promise<void> {
+  private async ensureChromeReady(
+    _serverId: string,
+    serverName: string,
+    client: Client
+  ): Promise<void> {
     log(`[MCPManager] Ensuring Chrome is ready for ${serverName}...`);
-    
+
     // Step 1: Check if debugging port is accessible
     log(`[MCPManager] Step 1: Checking if Chrome debug port 9222 is accessible...`);
     const portReady = await this.isChromeDebugPortReady();
-    
+
     if (portReady) {
       log(`[MCPManager] ✓ Chrome debug port (9222) is accessible`);
-      
+
       // Verify tool connection works
       log(`[MCPManager] Verifying MCP tool connection with list_pages...`);
       try {
@@ -871,17 +932,17 @@ export class MCPManager {
       log(`[MCPManager] ✗ Chrome debug port (9222) not accessible`);
       log(`[MCPManager] Will start new Chrome instance with debugging enabled...`);
     }
-    
+
     // Step 2: Start Chrome with remote debugging
     log(`[MCPManager] Step 2: Starting Chrome with remote debugging...`);
     try {
       await this.startChromeWithDebugging();
       log(`[MCPManager] Chrome start command executed`);
-      
+
       // Wait for Chrome debugging port to become ready
       log(`[MCPManager] Step 3: Waiting for Chrome debug port to become ready...`);
       const portBecameReady = await this.waitForChromeDebugPort(15, 1000);
-      
+
       if (!portBecameReady) {
         logError(`[MCPManager] ❌ Chrome debug port did not become ready after 15 seconds`);
         logError(`[MCPManager] Possible reasons:`);
@@ -890,9 +951,9 @@ export class MCPManager {
         logError(`[MCPManager]   3. Firewall blocking the port`);
         throw new Error('Chrome 浏览器未就绪，无法执行此操作: debug port did not become ready');
       }
-      
+
       log(`[MCPManager] ✓ Chrome debug port is now ready`);
-      
+
       // Verify tool connection
       log(`[MCPManager] Step 4: Verifying MCP tool connection...`);
       for (let i = 0; i < 5; i++) {
@@ -909,12 +970,16 @@ export class MCPManager {
           if (i < 4) {
             log(`[MCPManager] Connection verification attempt ${i + 1}/5 failed, retrying...`);
             log(`[MCPManager] Error: ${ve.message}`);
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise((resolve) => setTimeout(resolve, 1000));
           } else {
-            logError(`[MCPManager] ❌ Chrome started but MCP connection verification failed after 5 attempts`);
+            logError(
+              `[MCPManager] ❌ Chrome started but MCP connection verification failed after 5 attempts`
+            );
             logError(`[MCPManager] Last error code: ${ve.code}, message: ${ve.message}`);
             logError(`[MCPManager] The chrome-devtools-mcp server may not be working correctly`);
-            throw new Error('Chrome 浏览器未就绪，无法执行此操作: MCP connection verification failed after 5 attempts');
+            throw new Error(
+              'Chrome 浏览器未就绪，无法执行此操作: MCP connection verification failed after 5 attempts'
+            );
           }
         }
       }
@@ -932,16 +997,15 @@ export class MCPManager {
    */
   private getChromeUserDataDir(): string {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const os = require('os');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const path = require('path');
-    return path.join(os.tmpdir(), 'chrome-mcp-debug');
+    // Use userData so the debug profile survives reboots and isn't wiped by OS temp-dir cleanup
+    return path.join(app.getPath('userData'), 'chrome-mcp-debug');
   }
 
   /**
    * Start Chrome with remote debugging enabled on port 9222
    * Following official guide: https://github.com/ChromeDevTools/chrome-devtools-mcp
-   * 
+   *
    * Key requirements:
    * 1. Must use --user-data-dir (Chrome 136+ requirement)
    * 2. Must use --remote-debugging-port=9222
@@ -977,8 +1041,20 @@ export class MCPManager {
       // Chrome can be installed in per-user (%LOCALAPPDATA%) or system-wide locations
       const candidates = [
         path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        path.join(process.env['PROGRAMFILES'] || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        path.join(
+          process.env['PROGRAMFILES'] || 'C:\\Program Files',
+          'Google',
+          'Chrome',
+          'Application',
+          'chrome.exe'
+        ),
+        path.join(
+          process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)',
+          'Google',
+          'Chrome',
+          'Application',
+          'chrome.exe'
+        ),
       ];
       chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'; // fallback
       for (const candidate of candidates) {
@@ -1003,8 +1079,16 @@ export class MCPManager {
 
       log(`[MCPManager] Chrome spawned successfully`);
     } catch (error: unknown) {
+      // ENOENT means the Chrome executable was not found — re-throw so the caller knows
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(
+          `Chrome executable not found at: ${chromePath}. Please install Google Chrome.`
+        );
+      }
       logWarn(`[MCPManager] Chrome startup command completed with warning`);
-      logWarn(`[MCPManager] Error message: ${error instanceof Error ? error.message : String(error)}`);
+      logWarn(
+        `[MCPManager] Error message: ${error instanceof Error ? error.message : String(error)}`
+      );
       const spawnErr = error as { stdout?: string; stderr?: string };
       if (spawnErr.stdout) {
         log(`[MCPManager] stdout: ${spawnErr.stdout}`);
@@ -1022,13 +1106,12 @@ export class MCPManager {
    */
   private async gracefulKill(proc: ChildProcess, timeoutMs = 5000): Promise<void> {
     return new Promise((resolve) => {
-      proc.once('exit', () => resolve());
       if (process.platform === 'win32') {
         proc.kill(); // Windows: TerminateProcess
       } else {
         proc.kill('SIGTERM'); // Unix: graceful shutdown
       }
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (!proc.killed) {
           if (process.platform === 'win32') {
             proc.kill();
@@ -1038,6 +1121,10 @@ export class MCPManager {
         }
         resolve();
       }, timeoutMs);
+      proc.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
     });
   }
 
@@ -1047,7 +1134,6 @@ export class MCPManager {
   async disconnectServer(serverId: string): Promise<void> {
     const client = this.clients.get(serverId);
     const transport = this.transports.get(serverId);
-    const process = this.processes.get(serverId);
 
     if (client) {
       try {
@@ -1065,16 +1151,6 @@ export class MCPManager {
         logError(`[MCPManager] Error closing transport for ${serverId}:`, error);
       }
       this.transports.delete(serverId);
-    }
-
-    // Kill process if we're managing it (for legacy compatibility)
-    if (process) {
-      try {
-        await this.gracefulKill(process);
-      } catch (error) {
-        // Process may already be terminated
-      }
-      this.processes.delete(serverId);
     }
 
     // Remove tools from this server
@@ -1137,7 +1213,8 @@ export class MCPManager {
         for (const tool of listToolsResult.tools) {
           // Prefix tool name with server name to avoid conflicts
           // Format: mcp__<ServerName>__<toolName> (double underscores, preserve case)
-          const serverKey = config.name.replace(/\s+/g, '_');
+          // Sanitize: collapse whitespace and collapse any accidental __ sequences
+          const serverKey = config.name.replace(/\s+/g, '_').replace(/__/g, '_');
           const prefixedName = `mcp__${serverKey}__${tool.name}`;
 
           newTools.set(prefixedName, {
@@ -1241,7 +1318,10 @@ export class MCPManager {
         });
         let callTimeoutId: ReturnType<typeof setTimeout>;
         const timeoutPromise = new Promise<never>((_, reject) => {
-          callTimeoutId = setTimeout(() => reject(new Error(`Tool call timeout after ${timeoutMs}ms`)), timeoutMs);
+          callTimeoutId = setTimeout(
+            () => reject(new Error(`Tool call timeout after ${timeoutMs}ms`)),
+            timeoutMs
+          );
         });
 
         let result;
@@ -1275,7 +1355,10 @@ export class MCPManager {
       } catch (error: unknown) {
         lastError = error;
         const errorMsg = error instanceof Error ? error.message : String(error);
-        logCtxError(`[MCPManager] Error calling tool ${toolName} (attempt ${attempt + 1}/${maxRetries + 1}):`, errorMsg);
+        logCtxError(
+          `[MCPManager] Error calling tool ${toolName} (attempt ${attempt + 1}/${maxRetries + 1}):`,
+          errorMsg
+        );
 
         if (attempt >= maxRetries) {
           break;
@@ -1288,21 +1371,25 @@ export class MCPManager {
           lowerErrorMsg.includes('connection closed');
 
         if (shouldReconnect) {
-          log(`[MCPManager] Reconnectable MCP error detected for ${tool.serverName}; attempting reconnect...`);
+          log(
+            `[MCPManager] Reconnectable MCP error detected for ${tool.serverName}; attempting reconnect...`
+          );
           const reconnected = await this.reconnectServer(tool.serverId);
           if (reconnected) {
             continue;
           }
-          logWarn(`[MCPManager] Reconnect attempt failed for ${tool.serverName}, will retry after backoff`);
+          logWarn(
+            `[MCPManager] Reconnect attempt failed for ${tool.serverName}, will retry after backoff`
+          );
           const delay = Math.min(2000 * Math.pow(1.5, attempt), 10000);
-          await new Promise(resolve => setTimeout(resolve, delay));
+          await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
 
         if (errorMsg.includes('timeout')) {
           log(`[MCPManager] Tool call timeout detected, retrying after backoff...`);
           const delay = Math.min(2000 * Math.pow(1.5, attempt), 10000);
-          await new Promise(resolve => setTimeout(resolve, delay));
+          await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
 
@@ -1317,7 +1404,9 @@ export class MCPManager {
   private async reconnectServer(serverId: string): Promise<boolean> {
     // Prevent concurrent reconnect operations for the same server
     if (this.reconnectingServers.has(serverId)) {
-      logWarn(`[MCPManager] Skipping reconnectServer for ${serverId}: reconnect already in progress`);
+      logWarn(
+        `[MCPManager] Skipping reconnectServer for ${serverId}: reconnect already in progress`
+      );
       return false;
     }
     const config = this.serverConfigs.get(serverId);
@@ -1462,7 +1551,11 @@ function shouldReconnectOnStructuredToolError(errorMessage: string): boolean {
   return isReconnectableErrorText(errorMessage);
 }
 
-function shouldHotReloadGuiVisionServer(serverName: string, actualToolName: string, errorMessage: string): boolean {
+function shouldHotReloadGuiVisionServer(
+  serverName: string,
+  actualToolName: string,
+  errorMessage: string
+): boolean {
   if (!errorMessage) {
     return false;
   }
