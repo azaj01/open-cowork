@@ -254,16 +254,7 @@ export class RemoteGateway extends EventEmitter {
       sender: message.sender.id,
     });
 
-    // Check if this is a response to a pending interaction
-    if (this.messageInterceptor && message.content.type === 'text' && message.content.text) {
-      const consumed = await this.messageInterceptor(message);
-      if (consumed) {
-        log('[Gateway] Message consumed by interceptor (interaction response)');
-        return;
-      }
-    }
-
-    // Check if user is authorized
+    // Check if user is authorized FIRST — before any interceptor processing
     const authorized = await this.checkAuthorization(message);
     if (!authorized) {
       log('[Gateway] User not authorized:', message.sender.id);
@@ -284,6 +275,15 @@ export class RemoteGateway extends EventEmitter {
         });
       }
       return;
+    }
+
+    // Check if this is a response to a pending interaction (only after authorization)
+    if (this.messageInterceptor && message.content.type === 'text' && message.content.text) {
+      const consumed = await this.messageInterceptor(message);
+      if (consumed) {
+        log('[Gateway] Message consumed by interceptor (interaction response)');
+        return;
+      }
     }
 
     // Check group settings

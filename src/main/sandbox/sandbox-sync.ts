@@ -337,6 +337,16 @@ export class SandboxSync {
     }
 
     const sandboxDestPath = `${session.sandboxPath}/${sandboxRelativePath}`;
+
+    // Verify the destination resolves within the sandbox root to prevent path traversal
+    if (!isPathWithinRoot(sandboxDestPath, session.sandboxPath)) {
+      return {
+        success: false,
+        sandboxPath: sandboxDestPath,
+        error: `Path traversal detected: destination "${sandboxRelativePath}" resolves outside sandbox root`,
+      };
+    }
+
     log(`[SandboxSync] Syncing file to sandbox: ${windowsSourcePath} -> ${sandboxDestPath}`);
 
     try {

@@ -144,7 +144,7 @@ export class FeishuChannel extends ChannelBase {
     signature: string
   ): boolean {
     const verificationToken = this.config?.verificationToken;
-    if (!verificationToken) return true; // Skip if not configured
+    if (!verificationToken) return false; // Reject — verificationToken is required for webhook mode
 
     try {
       const content = timestamp + nonce + verificationToken + body;
@@ -170,11 +170,15 @@ export class FeishuChannel extends ChannelBase {
   ): { status: number; data: Record<string, unknown> } {
     log('[Feishu] Received webhook request');
 
-    // Verify webhook signature if present
+    // Verify webhook signature — always required
     const signature = _headers['x-lark-signature'];
     const timestamp = _headers['x-lark-request-timestamp'] || '';
     const nonce = _headers['x-lark-request-nonce'] || '';
-    if (signature && !this.verifyWebhookSignature(timestamp, nonce, body, signature)) {
+    if (!signature) {
+      logWarn('[Feishu] Webhook request rejected: missing X-Lark-Signature header');
+      return { status: 403, data: { error: 'Missing signature' } };
+    }
+    if (!this.verifyWebhookSignature(timestamp, nonce, body, signature)) {
       logWarn('[Feishu] Webhook signature verification failed');
       return { status: 403, data: { error: 'Invalid signature' } };
     }

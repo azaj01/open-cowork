@@ -1898,6 +1898,13 @@ async function executeGUIInteraction(
           if (!value) {
             return { success: false, message: 'Key required for key action' };
           }
+          // Validate key name: only allow alphanumeric, +, -, _, and spaces (for key combinations)
+          if (!/^[a-zA-Z0-9_+\-\s]+$/.test(value)) {
+            return {
+              success: false,
+              message: `Invalid key value: "${value}". Only alphanumeric, +, -, _, and space characters are allowed.`,
+            };
+          }
           await executeCommand(
             `docker exec ${currentGUIApp.containerId} bash -c "DISPLAY=:99 xdotool key ${value}"`,
             WORKSPACE_DIR
@@ -1912,7 +1919,7 @@ async function executeGUIInteraction(
               message: 'Coordinates required for drag action (format: "x1,y1,x2,y2")',
             };
           }
-          const [x1, y1, x2, y2] = value.split(',').map(Number);
+          const [x1, y1, x2, y2] = parseDragCoords(value);
           await executeCommand(
             `docker exec ${currentGUIApp.containerId} bash -c "DISPLAY=:99 xdotool mousemove ${x1} ${y1} mousedown 1 mousemove ${x2} ${y2} mouseup 1"`,
             WORKSPACE_DIR
@@ -2008,7 +2015,7 @@ async function executeGUIInteraction(
               message: 'Coordinates required for drag action (format: "x1,y1,x2,y2")',
             };
           }
-          const [x1, y1, x2, y2] = value.split(',').map(Number);
+          const [x1, y1, x2, y2] = parseDragCoords(value);
           await executeCliclick(`dd:${x1},${y1} m:${x2},${y2} du:${x2},${y2}`);
           await new Promise((resolve) => setTimeout(resolve, 500));
           return { success: true, action: 'drag', from: { x: x1, y: y1 }, to: { x: x2, y: y2 } };
@@ -2094,7 +2101,7 @@ async function executeGUIInteraction(
               message: 'Coordinates required for drag action (format: "x1,y1,x2,y2")',
             };
           }
-          const [x1, y1, x2, y2] = value.split(',').map(Number);
+          const [x1, y1, x2, y2] = parseDragCoords(value);
           await executeCommand(
             `xdotool mousemove ${x1} ${y1} mousedown 1 mousemove ${x2} ${y2} mouseup 1`
           );
@@ -2245,6 +2252,49 @@ async function executeClaudeCode(
   }
 }
 
+// Helper: Validate drag coordinates are finite integers
+function parseDragCoords(value: string): [number, number, number, number] {
+  const parts = value.split(',').map(Number);
+  if (parts.length !== 4) {
+    throw new Error(
+      `Drag coordinates must have exactly 4 values (x1,y1,x2,y2), got ${parts.length}`
+    );
+  }
+  const [x1, y1, x2, y2] = parts;
+  if (
+    !Number.isFinite(x1) ||
+    !Number.isFinite(y1) ||
+    !Number.isFinite(x2) ||
+    !Number.isFinite(y2)
+  ) {
+    throw new Error(`Drag coordinates must be finite numbers, got: ${value}`);
+  }
+  if (
+    !Number.isInteger(x1) ||
+    !Number.isInteger(y1) ||
+    !Number.isInteger(x2) ||
+    !Number.isInteger(y2)
+  ) {
+    throw new Error(`Drag coordinates must be integers, got: ${value}`);
+  }
+  return [x1, y1, x2, y2];
+}
+
+// Helper: Validate and resolve a file path within WORKSPACE_DIR (reject absolute + traversal)
+function resolveContainedPath(filePath: string): string {
+  if (path.isAbsolute(filePath)) {
+    throw new Error(`Absolute paths not allowed: ${filePath}`);
+  }
+  const fullPath = path.resolve(WORKSPACE_DIR, filePath);
+  if (
+    !fullPath.startsWith(path.resolve(WORKSPACE_DIR) + path.sep) &&
+    fullPath !== path.resolve(WORKSPACE_DIR)
+  ) {
+    throw new Error(`Path traversal detected: ${filePath}`);
+  }
+  return fullPath;
+}
+
 // Helper: Read file content
 async function readFile(filePath: string): Promise<string> {
   if (path.isAbsolute(filePath)) {
@@ -2267,7 +2317,7 @@ async function readFile(filePath: string): Promise<string> {
 // @ts-expect-error - Reserved for future use
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function writeFile(filePath: string, content: string): Promise<void> {
-  const fullPath = path.isAbsolute(filePath) ? filePath : path.join(WORKSPACE_DIR, filePath);
+  const fullPath = resolveContainedPath(filePath);
   try {
     // Ensure directory exists
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
@@ -2283,7 +2333,7 @@ async function writeFile(filePath: string, content: string): Promise<void> {
 // @ts-expect-error - Reserved for future use
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function deleteFile(filePath: string): Promise<void> {
-  const fullPath = path.isAbsolute(filePath) ? filePath : path.join(WORKSPACE_DIR, filePath);
+  const fullPath = resolveContainedPath(filePath);
   try {
     await fs.unlink(fullPath);
   } catch (error: unknown) {

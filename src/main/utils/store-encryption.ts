@@ -28,10 +28,7 @@ function uniqueValues(values: string[]): string[] {
 }
 
 function buildLegacyDirCandidates(moduleDirname: string): string[] {
-  const candidates = [
-    moduleDirname,
-    path.resolve(process.cwd(), 'dist-electron', 'main'),
-  ];
+  const candidates = [moduleDirname, path.resolve(process.cwd(), 'dist-electron', 'main')];
 
   if (process.resourcesPath) {
     candidates.push(path.join(process.resourcesPath, 'app.asar', 'dist-electron', 'main'));
@@ -49,7 +46,7 @@ const LEGACY_SCRYPT_OPTIONS: crypto.ScryptOptions = { N: 16384, r: 8, p: 1 };
 function deriveKeyBuffer(
   seed: string,
   salt: string,
-  options: crypto.ScryptOptions = SECURE_SCRYPT_OPTIONS,
+  options: crypto.ScryptOptions = SECURE_SCRYPT_OPTIONS
 ): Buffer {
   return crypto.scryptSync(seed, salt, 32, options);
 }
@@ -115,17 +112,25 @@ function moveUnreadableStoreToBackup(storePath: string): string {
 
 export function getLegacyDerivedKeyHexes(options: KeyMaterialOptions): string[] {
   return buildLegacyDirCandidates(options.moduleDirname).map((dir) =>
-    deriveKeyHex(`${os.hostname()}:${dir}:${options.legacySeed}`, options.salt, LEGACY_SCRYPT_OPTIONS)
+    deriveKeyHex(
+      `${os.hostname()}:${dir}:${options.legacySeed}`,
+      options.salt,
+      LEGACY_SCRYPT_OPTIONS
+    )
   );
 }
 
 export function getStableDerivedKeyBuffer(options: KeyMaterialOptions): Buffer {
-  return deriveKeyBuffer(options.stableSeed, options.salt, LEGACY_SCRYPT_OPTIONS);
+  return deriveKeyBuffer(options.stableSeed, options.salt, SECURE_SCRYPT_OPTIONS);
 }
 
 export function getLegacyDerivedKeyBuffers(options: KeyMaterialOptions): Buffer[] {
   return buildLegacyDirCandidates(options.moduleDirname).map((dir) =>
-    deriveKeyBuffer(`${os.hostname()}:${dir}:${options.legacySeed}`, options.salt, LEGACY_SCRYPT_OPTIONS)
+    deriveKeyBuffer(
+      `${os.hostname()}:${dir}:${options.legacySeed}`,
+      options.salt,
+      LEGACY_SCRYPT_OPTIONS
+    )
   );
 }
 
@@ -179,10 +184,10 @@ export function createEncryptedStoreWithKeyRotation<T extends Record<string, unk
             fs.copyFileSync(storePath, backupPath);
             fs.unlinkSync(storePath);
           }
-          options.log?.(
-            `${options.logPrefix} Migrating encrypted store to a stable key`,
-            { storePath, backupPath }
-          );
+          options.log?.(`${options.logPrefix} Migrating encrypted store to a stable key`, {
+            storePath,
+            backupPath,
+          });
         }
 
         return stableStore;
@@ -214,8 +219,6 @@ export function createEncryptedStoreWithKeyRotation<T extends Record<string, unk
     options.warn?.(
       `${options.logPrefix} Failed to read encrypted store with all keys: ${aggregated}`
     );
-    throw new Error(
-      `${options.logPrefix} All decryption keys failed: ${aggregated}`
-    );
+    throw new Error(`${options.logPrefix} All decryption keys failed: ${aggregated}`);
   }
 }

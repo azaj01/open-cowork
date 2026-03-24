@@ -40,7 +40,7 @@ import {
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { execFileSync, spawnSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { app } from 'electron';
 import { setMaxListeners } from 'node:events';
 import { getSandboxAdapter } from '../sandbox/sandbox-adapter';
@@ -714,7 +714,11 @@ ${hints.join('\n')}
    * When a sudo command is detected, prompts the user for a password,
    * then rewrites the command to pipe the password into sudo -S.
    */
-  private wrapBashToolForSudo(tools: ToolDefinition[], sessionId: string): ToolDefinition[] {
+  private wrapBashToolForSudo(
+    tools: ToolDefinition[],
+    sessionId: string,
+    effectiveCwd: string
+  ): ToolDefinition[] {
     if (!this.requestSudoPassword) return tools;
 
     const requestSudoPassword = this.requestSudoPassword;
@@ -753,7 +757,7 @@ ${hints.join('\n')}
             const rewrittenCommand = command.replace(/\bsudo\b(?!\s+-S)/g, 'sudo -S');
 
             // Pass password via stdin pipe so it never appears in process args
-            // or environment variables. Uses spawnSync with stdio: 'pipe'.
+            // or environment variables. Uses async spawn with stdio: 'pipe'.
             log(
               '[ClaudeAgentRunner] Executing sudo command with password injection (via stdin pipe)'
             );
@@ -761,14 +765,35 @@ ${hints.join('\n')}
               const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
               const shellArgs =
                 process.platform === 'win32' ? ['/c', rewrittenCommand] : ['-c', rewrittenCommand];
-              const result = spawnSync(shell, shellArgs, {
-                input: password + '\n',
-                encoding: 'utf-8',
-                timeout: (params.timeout ?? 120) * 1000,
-                stdio: ['pipe', 'pipe', 'pipe'],
-                cwd: undefined,
+              const timeoutMs = (params.timeout ?? 120) * 1000;
+              const output = await new Promise<string>((resolve, reject) => {
+                const child = spawn(shell, shellArgs, {
+                  stdio: ['pipe', 'pipe', 'pipe'],
+                  cwd: effectiveCwd,
+                });
+                let stdout = '';
+                let stderr = '';
+                const timer = setTimeout(() => {
+                  child.kill('SIGKILL');
+                  reject(new Error(`Sudo command timed out after ${timeoutMs}ms`));
+                }, timeoutMs);
+                child.stdout.on('data', (chunk: Buffer) => {
+                  stdout += chunk.toString();
+                });
+                child.stderr.on('data', (chunk: Buffer) => {
+                  stderr += chunk.toString();
+                });
+                child.on('error', (err) => {
+                  clearTimeout(timer);
+                  reject(err);
+                });
+                child.on('close', () => {
+                  clearTimeout(timer);
+                  resolve(stdout + stderr);
+                });
+                child.stdin.write(password + '\n');
+                child.stdin.end();
               });
-              const output = (result.stdout || '') + (result.stderr || '');
               return {
                 content: [{ type: 'text' as const, text: output || '(no output)' }],
                 details: undefined as unknown,
@@ -1731,7 +1756,7 @@ Tool routing:
       // Note: wrapBashToolForSudo returns ToolDefinition[] (5-param execute) but
       // createAgentSession.tools expects Tool[] (4-param execute). The extra ctx
       // parameter is simply not passed by the session runner — safe to cast.
-      const wrappedTools = this.wrapBashToolForSudo(withTimeout, session.id);
+      const wrappedTools = this.wrapBashToolForSudo(withTimeout, session.id, effectiveCwd);
 
       // Diagnostic: log tools being passed to SDK (helps debug Ollama tool use)
       logCtx(`[ClaudeAgentRunner] Session reuse check: cached=${!!cachedSession}`);
