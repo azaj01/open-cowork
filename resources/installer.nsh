@@ -38,7 +38,7 @@
 
   _oc_check_app_prompt:
   ; Process is still running — ask the user to close it manually
-  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION /SD IDCANCEL "Open Cowork is still running and could not be stopped automatically.$\r$\n$\r$\nPlease close Open Cowork manually, then click Retry.$\r$\nClick Cancel to abort the installation." IDRETRY _oc_check_app_retry
+  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION /SD IDCANCEL "Open Cowork is still running. Please close it manually, then click Retry." IDRETRY _oc_check_app_retry
   Quit
 
   _oc_check_app_retry:
