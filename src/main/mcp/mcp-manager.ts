@@ -677,20 +677,22 @@ export class MCPManager {
         path.basename(command).toLowerCase() === 'npx.cmd';
       if (isNpxCommand) {
         try {
-          const { execFile } = await import('child_process');
+          // On Windows, .cmd files (like npx.cmd) cannot be launched with execFile().
+          // Use exec() via shell to handle both .cmd and direct executables.
+          const { exec } = await import('child_process');
           const { promisify } = await import('util');
-          const execFileAsync = promisify(execFile);
+          const execAsync = promisify(exec);
 
-          log(`[MCPManager] Testing npx execution: ${command} --version`);
-          const testResult = await execFileAsync(command, ['--version'], {
+          const quotedCmd = command.includes(' ') ? `"${command}"` : command;
+          log(`[MCPManager] Testing npx execution: ${quotedCmd} --version`);
+          const testResult = await execAsync(`${quotedCmd} --version`, {
             timeout: 5000,
             env: env,
           });
           log(`[MCPManager] npx test successful: ${testResult.stdout.trim()}`);
         } catch (testError: unknown) {
-          logError(
-            `[MCPManager] npx test failed: ${testError instanceof Error ? testError.message : String(testError)}`
-          );
+          const errorMsg = testError instanceof Error ? testError.message : String(testError);
+          logError(`[MCPManager] npx test failed: ${errorMsg}`);
           if (
             testError instanceof Error &&
             (testError as NodeJS.ErrnoException & { stderr?: string }).stderr
@@ -699,7 +701,11 @@ export class MCPManager {
               `[MCPManager] npx test stderr: ${(testError as NodeJS.ErrnoException & { stderr?: string }).stderr}`
             );
           }
-          logError(`[MCPManager] This indicates npx cannot run with the current environment`);
+          // Log warning but do not throw — the real transport spawn may still succeed,
+          // and on Windows .cmd resolution can behave differently between exec and spawn.
+          logError(
+            `[MCPManager] npx pre-check failed. The connection attempt will proceed but may fail.`
+          );
         }
       }
 

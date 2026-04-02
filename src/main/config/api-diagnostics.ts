@@ -375,16 +375,26 @@ async function stepAuth(input: DiagnosticInput, step: DiagnosticStep): Promise<v
 
     step.status = 'ok';
   } catch (err) {
-    step.status = 'fail';
     const e = getApiErrorInfo(err);
-    step.error = e.message;
 
-    if (e.status === 401 || e.status === 403) {
-      step.fix = 'auth_invalid_key';
-    } else if (e.status === 404) {
-      step.fix = 'auth_endpoint_not_found';
+    if (e.status === 404) {
+      // Many OpenAI-compatible providers (e.g. Alibaba DashScope) don't
+      // implement GET /v1/models.  A 404 does NOT mean auth failed — let
+      // stepModel (which uses chat completion) make the real determination.
+      step.status = 'ok';
+      step.fix = 'models_list_not_supported';
+      log(
+        '[Diagnostics] Auth: models.list returned 404 — provider may not support this endpoint, continuing to model check'
+      );
     } else {
-      step.fix = 'auth_request_failed';
+      step.status = 'fail';
+      step.error = e.message;
+
+      if (e.status === 401 || e.status === 403) {
+        step.fix = 'auth_invalid_key';
+      } else {
+        step.fix = 'auth_request_failed';
+      }
     }
   }
   step.latencyMs = Date.now() - start;
