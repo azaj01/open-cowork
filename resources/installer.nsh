@@ -1,4 +1,9 @@
 !macro customCheckAppRunning
+  ; Only run the kill logic during installation, not during uninstall.
+  ; electron-builder expands this macro in both installer and uninstaller passes.
+  ; The uninstaller pass prefixes labels with "un." which breaks Goto/IDRETRY references.
+  !ifndef BUILD_UNINSTALLER
+
   ; Kill the entire process tree: main app + children (node.exe, MCP servers, WSL)
   ; /T = kill child processes, /F = force (TerminateProcess, no graceful shutdown)
   nsExec::Exec 'taskkill /T /F /IM "Open Cowork.exe"'
@@ -51,6 +56,8 @@
     Goto _oc_check_app_verify
 
   _oc_check_app_done:
+
+  !endif ; BUILD_UNINSTALLER
 !macroend
 
 Function OpenCoworkShowLegacyUninstallHelp
