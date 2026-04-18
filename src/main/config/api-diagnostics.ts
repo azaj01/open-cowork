@@ -341,7 +341,7 @@ async function stepAuth(input: DiagnosticInput, step: DiagnosticStep): Promise<v
       const clientBaseUrl = resolveClientBaseUrl(input);
       const httpOptions = { ...(clientBaseUrl ? { baseUrl: clientBaseUrl } : {}), timeout: 15000 };
       const client = new GoogleGenAI({ apiKey, httpOptions });
-      const modelToCheck = input.model?.trim() || 'gemini-2.0-flash';
+      const modelToCheck = input.model?.trim() || 'gemini-3-flash-preview';
       await client.models.get({ model: modelToCheck });
       step.status = 'ok';
     } catch (err) {
